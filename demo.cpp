@@ -1,14 +1,14 @@
-#include <iostream>
-#include <opencv2/opencv.hpp>
-#include <thread>
 #include <time.h>
-#include <unistd.h>
+#include <thread>
 #include <csignal>
 #include <netdb.h>
+#include <unistd.h>
+#include <iostream>
 #include <arpa/inet.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <opencv2/opencv.hpp>
 
 using namespace std;
 
@@ -67,7 +67,7 @@ void t1_getframe(void)
     cout << "T1: 视频接收线程...启动" << endl;
 
     if ((sock_fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-        printf("T1: 故障：无法创建套接字\n");
+        printf("T1: 故障！无法创建套接字\n");
         return;
     }
 
@@ -77,12 +77,12 @@ void t1_getframe(void)
 
     int rcv_size = 1024 * 1024;
     if ((ret = setsockopt(sock_fd, SOL_SOCKET, SO_RCVBUF, (char *)&rcv_size, sizeof(rcv_size))) < 0) {
-        printf("T1: 故障：无法设定套接字\n");
+        printf("T1: 故障！无法设定缓冲区大小\n");
         return;
     };
 
     if ((ret = bind(sock_fd, (sockaddr *)&src_addr, sizeof(src_addr))) < 0) {
-        printf("T1: 故障：无法绑定端口\n");
+        printf("T1: 故障！无法绑定到指定端口\n");
         return;
     };
 
@@ -98,7 +98,7 @@ void t1_getframe(void)
 
         while (true) {
             if ((ret = recvfrom(sock_fd, pkt_buff, FRAME_PKT, 0, (sockaddr *)&src_addr, &src_len)) < 0) {
-                printf("T1: 故障: %s\n", strerror(errno));
+                printf("T1: 故障！%s\n", strerror(errno));
             }
 
             pkt_idx_prev = pkt_idx;
@@ -167,7 +167,7 @@ void t2_showframe(void)
 
             string s = "FPS:" + to_string(fps / 10) + "." + to_string(fps % 10);
             cv::putText(frame_buff, s.c_str(), cv::Point(10, 30), cv::FONT_HERSHEY_COMPLEX, 1.0, cv::Scalar(0, 255, 0), 2, 8, 0);
-            string e = "ERR:" + to_string(err / 100) + "." + to_string(err % 100) + "%";
+            string e = "ERR:" + to_string(err / 100) + "." + string(2 - to_string(err % 100).length(), '0') + to_string(err % 100) + "%";
             cv::putText(frame_buff, e.c_str(), cv::Point(10, 60), cv::FONT_HERSHEY_COMPLEX, 1.0, cv::Scalar(0, 0, 255), 2, 8, 0);
 
             cv::waitKey(1);
