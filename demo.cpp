@@ -104,8 +104,8 @@ void t1_getframe(void)
             pkt_idx_prev = pkt_idx;
             pkt_idx = pkt_buff[0] << 8 | pkt_buff[1];
 
-            if (pkt_idx_prev != pkt_idx - 1) {
-                printf("T1: 故障: %d => %d\n", pkt_idx_prev, pkt_idx);
+            if (pkt_idx != 0 && pkt_idx_prev != pkt_idx - 1) {
+                printf("T1: 丢包！ %d => %d\n", pkt_idx_prev, pkt_idx);
             }
 
             if (pkt_idx == 0) {
