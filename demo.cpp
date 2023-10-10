@@ -15,7 +15,7 @@ using namespace std;
 #define FRAME_CNT    (60)
 #define FRAME_FPS    (20)
 #define FRAME_PKT    (1442)
-#define FRAME_SYN    (2879)
+#define FRAME_SEQ    (2880)
 
 #define FRAME_WIDTH  (1920)
 #define FRAME_HEIGHT (1080)
@@ -60,7 +60,6 @@ void t1_getframe(void)
     uint8_t  pkt_buff[FRAME_PKT] = {0};
 
     uint16_t count_curr = 0;
-
     uint8_t  frame_curr = 0;
     bool     frame_sync = false;
     cv::Mat  frame_buff[FRAME_CNT];
@@ -76,6 +75,12 @@ void t1_getframe(void)
     src_addr.sin_addr.s_addr = inet_addr("192.168.1.102");
     src_addr.sin_port = htons(8001);
 
+    int rcv_size = 1024 * 1024;
+    if ((ret = setsockopt(sock_fd, SOL_SOCKET, SO_RCVBUF, (char *)&rcv_size, sizeof(rcv_size))) < 0) {
+        printf("T1: 故障：无法设定套接字\n");
+        return;
+    };
+
     if ((ret = bind(sock_fd, (sockaddr *)&src_addr, sizeof(src_addr))) < 0) {
         printf("T1: 故障：无法绑定端口\n");
         return;
@@ -86,16 +91,25 @@ void t1_getframe(void)
     }
 
     while (running) {
+        static uint16_t pkt_idx_prev = 0;
+
+        frame_sync = false;
+        count_curr = 0;
+
         while (true) {
             if ((ret = recvfrom(sock_fd, pkt_buff, FRAME_PKT, 0, (sockaddr *)&src_addr, &src_len)) < 0) {
                 printf("T1: 故障: %s\n", strerror(errno));
             }
 
+            pkt_idx_prev = pkt_idx;
             pkt_idx = pkt_buff[0] << 8 | pkt_buff[1];
+
+            if (pkt_idx_prev != pkt_idx - 1) {
+                printf("T1: 故障: %d => %d\n", pkt_idx_prev, pkt_idx);
+            }
 
             if (pkt_idx == 0) {
                 if (!frame_sync) {
-                    count_curr = 0;
                     frame_sync = true;
                 }
             } else {
@@ -104,11 +118,11 @@ void t1_getframe(void)
                 }
             }
 
-            rgb565_bgr888(frame_buff[frame_curr].data + pkt_idx * (FRAME_PKT - 2) / 2 * 3, (uint16_t *)&pkt_buff[2], (FRAME_PKT - 2) / 2);
-
             count_curr++;
 
-            if (frame_sync && (pkt_idx == FRAME_SYN)) {
+            rgb565_bgr888(frame_buff[frame_curr].data + pkt_idx * (FRAME_PKT - 2) / 2 * 3, (uint16_t *)&pkt_buff[2], (FRAME_PKT - 2) / 2);
+
+            if (frame_sync && (pkt_idx == FRAME_SEQ - 1)) {
                 break;
             }
         }
@@ -118,12 +132,8 @@ void t1_getframe(void)
         frame_queue.push(frame_buff[frame_curr]);
         frame_mutex.unlock();
 
-        count_curr = 0;
-
         frame_curr = (++frame_curr) % FRAME_CNT;
         frame_buff[frame_curr].setTo(cv::Scalar(0, 0, 0));
-
-        // usleep(1000 * 1000 / FRAME_FPS);
     }
 
     cout << "T1: 视频接收线程...关闭" << endl;
@@ -131,11 +141,11 @@ void t1_getframe(void)
 
 void t2_showframe(void)
 {
-    int fps = 0;
-    uint16_t count_curr;
-    cv::Mat frame_buff(cv::Size(FRAME_WIDTH, FRAME_HEIGHT), CV_8UC3, cv::Scalar(0, 0, 0));
+    uint16_t count_curr = 0;
+    uint16_t fps = 0, err = 0;
     struct timespec start  = {0, 0};
     struct timespec finish = {0, 0};
+    cv::Mat frame_buff(cv::Size(FRAME_WIDTH, FRAME_HEIGHT), CV_8UC3, cv::Scalar(0, 0, 0));
 
     cout << "T2: 视频显示线程...启动" << endl;
 
@@ -143,35 +153,31 @@ void t2_showframe(void)
 
 	while (running) {
 		if (!frame_queue.empty()) {
-            clock_gettime(CLOCK_REALTIME, &start);
-
-			frame_mutex.lock();
-			frame_buff = frame_queue.front();
-			frame_queue.pop();
-            count_curr = count_queue.front();
-            count_queue.pop();
-			frame_mutex.unlock();
-
-            if (!frame_buff.empty()) {
-                int err = (FRAME_SYN - count_curr) * 10000 / FRAME_SYN;
-
-                string s = "FPS:" + to_string(fps / 10) + "." + to_string(fps % 10);
-                cv::putText(frame_buff, s.c_str(), cv::Point(10, 30), cv::FONT_HERSHEY_COMPLEX, 1.0, cv::Scalar(0, 255, 255), 2, 8, 0);
-                string e = "ERR:" + to_string(err / 100) + "." + to_string(err % 100) + "%";
-                cv::putText(frame_buff, e.c_str(), cv::Point(10, 60), cv::FONT_HERSHEY_COMPLEX, 1.0, cv::Scalar(0, 0, 255), 2, 8, 0);
-
-                cv::imshow("frame", frame_buff);
-            } else {
-                usleep(1000);
-                continue;
-            }
-
-            cv::waitKey(1000 / FRAME_FPS);
-
             clock_gettime(CLOCK_REALTIME, &finish);
 
-            fps = (double)10000 / ((finish.tv_sec - start.tv_sec) * 1000 + (finish.tv_nsec - start.tv_nsec) / 1000000);
-		}
+			frame_mutex.lock();
+            count_curr = count_queue.front();
+            count_queue.pop();
+			frame_buff = frame_queue.front();
+			frame_queue.pop();
+			frame_mutex.unlock();
+
+            fps = 10000.0 / ((finish.tv_sec - start.tv_sec) * 1000 + (finish.tv_nsec - start.tv_nsec) / 1000000);
+            err = (FRAME_SEQ - count_curr) * 10000 / FRAME_SEQ;
+
+            string s = "FPS:" + to_string(fps / 10) + "." + to_string(fps % 10);
+            cv::putText(frame_buff, s.c_str(), cv::Point(10, 30), cv::FONT_HERSHEY_COMPLEX, 1.0, cv::Scalar(0, 255, 0), 2, 8, 0);
+            string e = "ERR:" + to_string(err / 100) + "." + to_string(err % 100) + "%";
+            cv::putText(frame_buff, e.c_str(), cv::Point(10, 60), cv::FONT_HERSHEY_COMPLEX, 1.0, cv::Scalar(0, 0, 255), 2, 8, 0);
+
+            cv::waitKey(1);
+            cv::imshow("frame", frame_buff);
+		} else {
+            usleep(1000);
+            continue;
+        }
+
+        clock_gettime(CLOCK_REALTIME, &start);
 	}
 
 	cv::destroyWindow("frame");
