@@ -12,8 +12,7 @@
 
 using namespace std;
 
-#define FRAME_CNT    (3)
-#define FRAME_FPS    (20)
+#define FRAME_CNT    (20)
 #define FRAME_PKT    (1442)
 #define FRAME_SEQ    (2880)
 
@@ -61,9 +60,8 @@ void t1_recvframe(void)
     uint8_t  pkt_buff[FRAME_PKT] = {0};
 
     uint16_t count_curr = 0;
-    uint8_t  frame_curr = 0;
     bool     frame_sync = false;
-    cv::Mat  frame_buff[FRAME_CNT];
+    cv::Mat  frame_buff(cv::Size(FRAME_WIDTH, FRAME_HEIGHT), CV_8UC3, cv::Scalar(0, 0, 0));
 
     src_addr.sin_family = AF_INET;
     src_addr.sin_addr.s_addr = inet_addr("192.168.1.102");
@@ -85,10 +83,6 @@ void t1_recvframe(void)
         printf("T1: 故障！无法绑定到指定端口\n");
         goto err_t1s;
     };
-
-    for (int i = 0; i < FRAME_CNT; i++) {
-        frame_buff[i] = cv::Mat(cv::Size(FRAME_WIDTH, FRAME_HEIGHT), CV_8UC3, cv::Scalar(0, 0, 0));
-    }
 
     while (running) {
         static uint16_t pkt_idx_prev = 0;
@@ -127,7 +121,7 @@ void t1_recvframe(void)
             count_curr++;
 
             if (pkt_idx < FRAME_SEQ) {
-                rgb565_bgr888(frame_buff[frame_curr].data + pkt_idx * (FRAME_PKT - 2) * 3 / 2, pkt_buff + 2, (FRAME_PKT - 2) / 2);
+                rgb565_bgr888(frame_buff.data + pkt_idx * (FRAME_PKT - 2) * 3 / 2, pkt_buff + 2, (FRAME_PKT - 2) / 2);
             } else {
                 printf("T1: 错误！数据包无效：%d\n", pkt_idx);
             }
@@ -137,13 +131,14 @@ void t1_recvframe(void)
             }
         }
 
-        frame_mutex.lock();
-        count_queue.push(count_curr);
-        frame_queue.push(frame_buff[frame_curr]);
-        frame_mutex.unlock();
+        if (frame_queue.empty()) {
+            frame_mutex.lock();
+            count_queue.push(count_curr);
+            frame_queue.push(frame_buff.clone());
+            frame_mutex.unlock();
+        }
 
-        frame_curr = (++frame_curr) % FRAME_CNT;
-        frame_buff[frame_curr].setTo(cv::Scalar(0, 0, 0));
+        frame_buff.setTo(cv::Scalar(0, 0, 0));
     }
 
 err_t1s:
@@ -184,11 +179,11 @@ void t2_showframe(void)
             fps_sum += (finish.tv_sec - start.tv_sec) * 1000 + (finish.tv_nsec - start.tv_nsec) / 1000000;
             err_sum += FRAME_SEQ - count_curr;
 
-            if (update++ == FRAME_FPS + 2) {
+            if (update++ == FRAME_CNT + 2) {
                 update = 0;
 
-                fps = 10000.0 * FRAME_FPS / fps_sum;
-                err = err_sum * 10000 / FRAME_FPS / FRAME_SEQ;
+                fps = 10000.0 * FRAME_CNT / fps_sum;
+                err = err_sum * 10000 / FRAME_CNT / FRAME_SEQ;
 
                 fps_sum = 0;
                 err_sum = 0;

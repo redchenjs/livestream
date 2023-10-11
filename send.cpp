@@ -12,10 +12,7 @@
 
 using namespace std;
 
-#define FPS_SET      (20)
-
-#define FRAME_CNT    (3)
-#define FRAME_FPS    (20)
+#define FRAME_CNT    (20)
 #define FRAME_PKT    (1442)
 #define FRAME_SEQ    (2880)
 
@@ -62,17 +59,17 @@ void t1_genframe(void)
         cv::Rect rec = cv::Rect(cv::Point(500,500), cv::Point(1000,1000));
 
         contour.push_back(rec.tl());
-        contour.push_back(cv::Point(rec.tl().x + rec.width , rec.tl().y ) );
-        contour.push_back(cv::Point(rec.tl().x + rec.width , rec.tl().y + rec.height));
-        contour.push_back(cv::Point(rec.tl().x , rec.tl().y + rec.height ));
+        contour.push_back(cv::Point(rec.tl().x + rec.width, rec.tl().y));
+        contour.push_back(cv::Point(rec.tl().x + rec.width, rec.tl().y + rec.height));
+        contour.push_back(cv::Point(rec.tl().x, rec.tl().y + rec.height));
 
         cv::fillConvexPoly(frame_buff, contour, cv::Scalar(255, 255, 255));
 
-        frame_mutex.lock();
         if (frame_queue.empty()) {
-            frame_queue.push(frame_buff);
+            frame_mutex.lock();
+            frame_queue.push(frame_buff.clone());
+            frame_mutex.unlock();
         }
-        frame_mutex.unlock();
 
         usleep(1000 * 50);
     }
