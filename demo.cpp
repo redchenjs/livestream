@@ -12,7 +12,7 @@
 
 using namespace std;
 
-#define FRAME_CNT    (60)
+#define FRAME_CNT    (3)
 #define FRAME_FPS    (20)
 #define FRAME_PKT    (1442)
 #define FRAME_SEQ    (2880)
@@ -53,8 +53,8 @@ void t1_getframe(void)
 {
     int ret = 0;
     int sock_fd = 0;
-    int opt_size = 16 * 1024 * 1024;
     socklen_t src_len = 0;
+    socklen_t rcv_opt = 16 * 1024 * 1024;
     struct sockaddr_in src_addr = { 0 };
 
     uint16_t pkt_idx = 0;
@@ -76,7 +76,7 @@ void t1_getframe(void)
         goto err_t1;
     }
 
-    if ((ret = setsockopt(sock_fd, SOL_SOCKET, SO_RCVBUF, (const char *)&opt_size, sizeof(opt_size))) < 0) {
+    if ((ret = setsockopt(sock_fd, SOL_SOCKET, SO_RCVBUF, (const char *)&rcv_opt, sizeof(rcv_opt))) < 0) {
         printf("T1: 故障！无法设定缓冲区大小\n");
         goto err_t1;
     };
@@ -104,8 +104,14 @@ void t1_getframe(void)
             pkt_idx_prev = pkt_idx;
             pkt_idx = pkt_buff[0] << 8 | pkt_buff[1];
 
-            if (pkt_idx != 0 && pkt_idx_prev != pkt_idx - 1) {
-                printf("T1: 丢包！ %d => %d\n", pkt_idx_prev, pkt_idx);
+            if ((pkt_idx == 0 && pkt_idx_prev != FRAME_SEQ - 1) ||
+                (pkt_idx != 0 && pkt_idx_prev != pkt_idx - 1)) {
+                printf("T1: 注意！数据包缺失：%d => %d\n", pkt_idx_prev, pkt_idx);
+
+                if (pkt_idx_prev >= pkt_idx) {
+                    frame_sync = false;
+                    count_curr = 0;
+                }
             }
 
             if (pkt_idx == 0) {
@@ -120,7 +126,11 @@ void t1_getframe(void)
 
             count_curr++;
 
-            rgb565_bgr888(frame_buff[frame_curr].data + pkt_idx * (FRAME_PKT - 2) / 2 * 3, (uint16_t *)&pkt_buff[2], (FRAME_PKT - 2) / 2);
+            if (pkt_idx < FRAME_SEQ) {
+                rgb565_bgr888(frame_buff[frame_curr].data + pkt_idx * (FRAME_PKT - 2) * 3 / 2, (uint16_t *)(pkt_buff + 2), (FRAME_PKT - 2) / 2);
+            } else {
+                printf("T1: 错误！数据包无效：%d\n", pkt_idx);
+            }
 
             if (frame_sync && (pkt_idx == FRAME_SEQ - 1)) {
                 break;
@@ -163,15 +173,15 @@ void t2_showframe(void)
 
             frame_mutex.lock();
             count_curr = count_queue.front();
-            count_queue.pop();
             frame_buff = frame_queue.front();
+            count_queue.pop();
             frame_queue.pop();
             frame_mutex.unlock();
 
             fps_sum += (finish.tv_sec - start.tv_sec) * 1000 + (finish.tv_nsec - start.tv_nsec) / 1000000;
             err_sum += FRAME_SEQ - count_curr;
 
-            if (update++ == FRAME_FPS + 1) {
+            if (update++ == FRAME_FPS + 3) {
                 update = 0;
 
                 fps = 10000.0 * FRAME_FPS / fps_sum;
@@ -196,7 +206,7 @@ void t2_showframe(void)
         clock_gettime(CLOCK_REALTIME, &start);
     }
 
-    cv::destroyWindow("frame");
+    cv::destroyWindow("Frame");
 
     cout << "T2: 视频显示线程...关闭" << endl;
 }
