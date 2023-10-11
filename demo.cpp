@@ -38,18 +38,18 @@ void signal_handle(int signum)
     }
 }
 
-void rgb565_bgr888(uint8_t *dest, uint16_t *src, int size)
+void rgb565_bgr888(uint8_t *dst, uint8_t *src, int size)
 {
     for (int i = 0; i < size; i++) {
-        uint16_t rgb16 = *src++;
+        uint16_t rgb565 = *src++ | (*src++ << 8);
 
-        dest[i * 3 + 2] = (rgb16 & 0xf800) >> 8;
-        dest[i * 3 + 1] = (rgb16 & 0x07e0) >> 3;
-        dest[i * 3 + 0] = (rgb16 & 0x001f) << 3;
+        dst[i * 3 + 0] = (rgb565 & 0x001f) << 3; // B
+        dst[i * 3 + 1] = (rgb565 & 0x07e0) >> 3; // G
+        dst[i * 3 + 2] = (rgb565 & 0xf800) >> 8; // R
     }
 }
 
-void t1_getframe(void)
+void t1_recvframe(void)
 {
     int ret = 0;
     int sock_fd = 0;
@@ -78,12 +78,12 @@ void t1_getframe(void)
 
     if ((ret = setsockopt(sock_fd, SOL_SOCKET, SO_RCVBUF, (const char *)&rcv_opt, sizeof(rcv_opt))) < 0) {
         printf("T1: 故障！无法设定缓冲区大小\n");
-        goto err_t1;
+        goto err_t1s;
     };
 
     if ((ret = bind(sock_fd, (sockaddr *)&src_addr, sizeof(src_addr))) < 0) {
         printf("T1: 故障！无法绑定到指定端口\n");
-        goto err_t1;
+        goto err_t1s;
     };
 
     for (int i = 0; i < FRAME_CNT; i++) {
@@ -106,7 +106,7 @@ void t1_getframe(void)
 
             if ((pkt_idx == 0 && pkt_idx_prev != FRAME_SEQ - 1) ||
                 (pkt_idx != 0 && pkt_idx_prev != pkt_idx - 1)) {
-                printf("T1: 注意！数据包缺失：%d => %d\n", pkt_idx_prev, pkt_idx);
+                printf("T1: 注意！数据包丢失：%d => %d\n", pkt_idx_prev, pkt_idx);
 
                 if (pkt_idx_prev >= pkt_idx) {
                     frame_sync = false;
@@ -127,7 +127,7 @@ void t1_getframe(void)
             count_curr++;
 
             if (pkt_idx < FRAME_SEQ) {
-                rgb565_bgr888(frame_buff[frame_curr].data + pkt_idx * (FRAME_PKT - 2) * 3 / 2, (uint16_t *)(pkt_buff + 2), (FRAME_PKT - 2) / 2);
+                rgb565_bgr888(frame_buff[frame_curr].data + pkt_idx * (FRAME_PKT - 2) * 3 / 2, pkt_buff + 2, (FRAME_PKT - 2) / 2);
             } else {
                 printf("T1: 错误！数据包无效：%d\n", pkt_idx);
             }
@@ -146,10 +146,13 @@ void t1_getframe(void)
         frame_buff[frame_curr].setTo(cv::Scalar(0, 0, 0));
     }
 
-err_t1:
-    cout << "T1: 视频接收线程...关闭" << endl;
+err_t1s:
+    close(sock_fd);
 
+err_t1:
     running = false;
+
+    cout << "T1: 视频接收线程...关闭" << endl;
 }
 
 void t2_showframe(void)
@@ -181,7 +184,7 @@ void t2_showframe(void)
             fps_sum += (finish.tv_sec - start.tv_sec) * 1000 + (finish.tv_nsec - start.tv_nsec) / 1000000;
             err_sum += FRAME_SEQ - count_curr;
 
-            if (update++ == FRAME_FPS + 3) {
+            if (update++ == FRAME_FPS + 2) {
                 update = 0;
 
                 fps = 10000.0 * FRAME_FPS / fps_sum;
@@ -220,7 +223,7 @@ int main()
 
     running = true;
 
-    thread t1(t1_getframe);
+    thread t1(t1_recvframe);
     t1.detach();
     thread t2(t2_showframe);
     t2.join();
