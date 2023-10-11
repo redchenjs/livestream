@@ -54,8 +54,8 @@ void t1_getframe(void)
 
     cout << "T1: 视频生成线程...启动" << endl;
 
-	while (running) {
-		while (frame_queue.size() > 3) {
+    while (running) {
+        while (frame_queue.size() > 3) {
             usleep(1000 * 1000 / FPS_SET);
         }
 
@@ -63,12 +63,12 @@ void t1_getframe(void)
 
         printf("%02x%02x%02x%02x\n", frame.data[0], frame.data[1], frame.data[2], frame.data[3]);
 
-		frame_mutex.lock();
-		frame_queue.push(frame);
-		frame_mutex.unlock();
+        frame_mutex.lock();
+        frame_queue.push(frame);
+        frame_mutex.unlock();
 
         usleep(1000 * 1000 / FPS_SET);
-	}
+    }
 
     cout << "T1: 视频生成线程...关闭" << endl;
 }
@@ -96,10 +96,10 @@ void t2_sendframe(void)
 
     while (running) {
         if (!frame_queue.empty()) {
-			frame_mutex.lock();
-			frame = frame_queue.front();
-			frame_queue.pop();
-			frame_mutex.unlock();
+            frame_mutex.lock();
+            frame = frame_queue.front();
+            frame_queue.pop();
+            frame_mutex.unlock();
 
             cv::cvtColor(frame, convert, cv::COLOR_BGR2BGR565);
 
@@ -117,7 +117,7 @@ void t2_sendframe(void)
                 data   += size;
                 remain -= size;
             }
-		}
+        }
 
         usleep(1000 * 1000 / FPS_SET);
     }
@@ -136,13 +136,13 @@ int main()
 
     running = true;
 
-	thread t1(t1_getframe);
-	t1.detach();
-	thread t2(t2_sendframe);
-	t2.join();
+    thread t1(t1_getframe);
+    t1.detach();
+    thread t2(t2_sendframe);
+    t2.join();
     t1.join();
 
     cout << "M : 视频发送进程...关闭" << endl;
 
-	return 0;
+    return 0;
 }

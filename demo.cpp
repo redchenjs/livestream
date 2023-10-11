@@ -53,6 +53,7 @@ void t1_getframe(void)
 {
     int ret = 0;
     int sock_fd = 0;
+    int opt_size = 16 * 1024 * 1024;
     socklen_t src_len = 0;
     struct sockaddr_in src_addr = { 0 };
 
@@ -64,26 +65,25 @@ void t1_getframe(void)
     bool     frame_sync = false;
     cv::Mat  frame_buff[FRAME_CNT];
 
-    cout << "T1: 视频接收线程...启动" << endl;
-
-    if ((sock_fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-        printf("T1: 故障！无法创建套接字\n");
-        return;
-    }
-
     src_addr.sin_family = AF_INET;
     src_addr.sin_addr.s_addr = inet_addr("192.168.1.102");
     src_addr.sin_port = htons(8001);
 
-    int rcv_size = 1024 * 1024;
-    if ((ret = setsockopt(sock_fd, SOL_SOCKET, SO_RCVBUF, (char *)&rcv_size, sizeof(rcv_size))) < 0) {
+    cout << "T1: 视频接收线程...启动" << endl;
+
+    if ((sock_fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+        printf("T1: 故障！无法创建套接字\n");
+        goto err_t1;
+    }
+
+    if ((ret = setsockopt(sock_fd, SOL_SOCKET, SO_RCVBUF, (const char *)&opt_size, sizeof(opt_size))) < 0) {
         printf("T1: 故障！无法设定缓冲区大小\n");
-        return;
+        goto err_t1;
     };
 
     if ((ret = bind(sock_fd, (sockaddr *)&src_addr, sizeof(src_addr))) < 0) {
         printf("T1: 故障！无法绑定到指定端口\n");
-        return;
+        goto err_t1;
     };
 
     for (int i = 0; i < FRAME_CNT; i++) {
@@ -136,51 +136,67 @@ void t1_getframe(void)
         frame_buff[frame_curr].setTo(cv::Scalar(0, 0, 0));
     }
 
+err_t1:
     cout << "T1: 视频接收线程...关闭" << endl;
+
+    running = false;
 }
 
 void t2_showframe(void)
 {
+    uint16_t update = 0;
     uint16_t count_curr = 0;
-    uint16_t fps = 0, err = 0;
+    uint32_t fps = 0, fps_sum = 0;
+    uint32_t err = 0, err_sum = 0;
     struct timespec start  = {0, 0};
     struct timespec finish = {0, 0};
     cv::Mat frame_buff(cv::Size(FRAME_WIDTH, FRAME_HEIGHT), CV_8UC3, cv::Scalar(0, 0, 0));
 
     cout << "T2: 视频显示线程...启动" << endl;
 
-	cv::namedWindow("frame");
+    cv::namedWindow("Frame", cv::WINDOW_NORMAL);
+    cv::setWindowProperty("Frame", cv::WND_PROP_FULLSCREEN, cv::WINDOW_FULLSCREEN);
 
-	while (running) {
-		if (!frame_queue.empty()) {
+    while (running) {
+        if (!frame_queue.empty()) {
             clock_gettime(CLOCK_REALTIME, &finish);
 
-			frame_mutex.lock();
+            frame_mutex.lock();
             count_curr = count_queue.front();
             count_queue.pop();
-			frame_buff = frame_queue.front();
-			frame_queue.pop();
-			frame_mutex.unlock();
+            frame_buff = frame_queue.front();
+            frame_queue.pop();
+            frame_mutex.unlock();
 
-            fps = 10000.0 / ((finish.tv_sec - start.tv_sec) * 1000 + (finish.tv_nsec - start.tv_nsec) / 1000000);
-            err = (FRAME_SEQ - count_curr) * 10000 / FRAME_SEQ;
+            fps_sum += (finish.tv_sec - start.tv_sec) * 1000 + (finish.tv_nsec - start.tv_nsec) / 1000000;
+            err_sum += FRAME_SEQ - count_curr;
 
-            string s = "FPS:" + to_string(fps / 10) + "." + to_string(fps % 10);
+            if (update++ == FRAME_FPS + 1) {
+                update = 0;
+
+                fps = 10000.0 * FRAME_FPS / fps_sum;
+                err = err_sum * 10000 / FRAME_FPS / FRAME_SEQ;
+
+                fps_sum = 0;
+                err_sum = 0;
+            }
+
+            string s = format("FPS:{:.1f}", fps / 10.0);
             cv::putText(frame_buff, s.c_str(), cv::Point(10, 30), cv::FONT_HERSHEY_COMPLEX, 1.0, cv::Scalar(0, 255, 0), 2, 8, 0);
-            string e = "ERR:" + to_string(err / 100) + "." + string(2 - to_string(err % 100).length(), '0') + to_string(err % 100) + "%";
+            string e = format("ERR:{:.2f}%", err / 100.0);
             cv::putText(frame_buff, e.c_str(), cv::Point(10, 60), cv::FONT_HERSHEY_COMPLEX, 1.0, cv::Scalar(0, 0, 255), 2, 8, 0);
 
             cv::waitKey(1);
-            cv::imshow("frame", frame_buff);
-		} else {
+            cv::imshow("Frame", frame_buff);
+        } else {
             usleep(1000);
             continue;
         }
 
         clock_gettime(CLOCK_REALTIME, &start);
-	}
+    }
 
-	cv::destroyWindow("frame");
+    cv::destroyWindow("frame");
 
     cout << "T2: 视频显示线程...关闭" << endl;
 }
@@ -194,13 +210,13 @@ int main()
 
     running = true;
 
-	thread t1(t1_getframe);
-	t1.detach();
-	thread t2(t2_showframe);
-	t2.join();
+    thread t1(t1_getframe);
+    t1.detach();
+    thread t2(t2_showframe);
+    t2.join();
     t1.join();
 
     cout << "M : 视频处理进程...关闭" << endl;
 
-	return 0;
+    return 0;
 }
