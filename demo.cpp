@@ -1,16 +1,25 @@
-#include <time.h>
+#include <mutex>
+#include <queue>
+#include <format>
 #include <thread>
-#include <csignal>
-#include <netdb.h>
-#include <unistd.h>
 #include <iostream>
-#include <arpa/inet.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <opencv2/opencv.hpp>
 
-using namespace std;
+#include <time.h>
+#include <signal.h>
+#include <sys/types.h>
+
+#ifdef _WIN32
+    #include <winsock.h>
+    #include <windows.h>
+#else
+    #include <netdb.h>
+    #include <unistd.h>
+    #include <arpa/inet.h>
+    #include <sys/socket.h>
+    #include <netinet/in.h>
+#endif
+
+#include <opencv2/opencv.hpp>
 
 #define FRAME_CNT    (20)
 #define FRAME_PKT    (1442)
@@ -21,26 +30,32 @@ using namespace std;
 
 bool running = false;
 
-mutex           frame_mutex;
-queue<cv::Mat>  frame_queue;
-queue<uint16_t> count_queue;
+std::mutex           frame_mutex;
+std::queue<cv::Mat>  frame_queue;
+std::queue<uint16_t> count_queue;
 
-void signal_handle(int signum)
-{
-    switch (signum) {
-    case SIGINT:
-    case SIGTERM:
-        running = false;
-        break;
-    default:
-        break;
+#ifndef _WIN32
+    void signal_handle(int signum)
+    {
+        switch (signum) {
+        case SIGINT:
+        case SIGTERM:
+            running = false;
+            break;
+        default:
+            break;
+        }
     }
-}
+#endif
 
 void rgb565_bgr888(uint8_t *dst, const uint8_t *src, int size)
 {
     for (int i = 0; i < size; i++) {
         uint16_t rgb565 = *src++ | (*src++ << 8); // (G[5:2] ... B[7:3]) | (R[7:3] ... G[7:5]) << 8
+
+    #ifdef _WIN32
+        rgb565 = ntohs(rgb565);
+    #endif
 
         dst[i * 3 + 0] = (rgb565 & 0x001f) << 3; // B
         dst[i * 3 + 1] = (rgb565 & 0x07e0) >> 3; // G
@@ -67,19 +82,27 @@ void t1_recvframe(void)
     src_addr.sin_addr.s_addr = inet_addr("192.168.1.102");
     src_addr.sin_port = htons(8001);
 
-    cout << "T1: 视频接收线程...启动" << endl;
+    std::cout << "T1: 视频接收线程...启动" << std::endl;
 
-    if ((sock_fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+#ifdef _WIN32
+    WSADATA wsaData = { 0 };
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        printf("T1: 故障! WSA\n");
+        goto err_t1;
+    }
+#endif
+
+    if ((sock_fd = ::socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
         printf("T1: 故障！无法创建套接字\n");
         goto err_t1;
     }
 
-    if ((ret = setsockopt(sock_fd, SOL_SOCKET, SO_RCVBUF, (const char *)&rcv_opt, sizeof(rcv_opt))) < 0) {
+    if ((ret = ::setsockopt(sock_fd, SOL_SOCKET, SO_RCVBUF, (const char *)&rcv_opt, sizeof(rcv_opt))) < 0) {
         printf("T1: 故障！无法设定缓冲区大小\n");
         goto err_t1s;
     };
 
-    if ((ret = bind(sock_fd, (sockaddr *)&src_addr, sizeof(src_addr))) < 0) {
+    if ((ret = ::bind(sock_fd, (sockaddr *)&src_addr, sizeof(src_addr))) < 0) {
         printf("T1: 故障！无法绑定到指定端口\n");
         goto err_t1s;
     };
@@ -91,7 +114,7 @@ void t1_recvframe(void)
         count_curr = 0;
 
         while (true) {
-            if ((ret = recvfrom(sock_fd, pkt_buff, FRAME_PKT, 0, (sockaddr *)&src_addr, &src_len)) < 0) {
+            if ((ret = ::recvfrom(sock_fd, pkt_buff, FRAME_PKT, 0, (sockaddr *)&src_addr, &src_len)) < 0) {
                 printf("T1: 故障！%s\n", strerror(errno));
             }
 
@@ -147,7 +170,7 @@ err_t1s:
 err_t1:
     running = false;
 
-    cout << "T1: 视频接收线程...关闭" << endl;
+    std::cout << "T1: 视频接收线程...关闭" << std::endl;
 }
 
 void t2_showframe(void)
@@ -160,14 +183,20 @@ void t2_showframe(void)
     struct timespec finish = {0, 0};
     cv::Mat frame_buff(cv::Size(FRAME_WIDTH, FRAME_HEIGHT), CV_8UC3, cv::Scalar(0, 0, 0));
 
-    cout << "T2: 视频显示线程...启动" << endl;
+    std::cout << "T2: 视频显示线程...启动" << std::endl;
 
     cv::namedWindow("Frame", cv::WINDOW_NORMAL);
     cv::setWindowProperty("Frame", cv::WND_PROP_FULLSCREEN, cv::WINDOW_FULLSCREEN);
 
     while (running) {
+    #ifndef _WIN32
+        clock_gettime(CLOCK_REALTIME, &start);
+    #endif
+
         if (!frame_queue.empty()) {
+        #ifndef _WIN32
             clock_gettime(CLOCK_REALTIME, &finish);
+        #endif
 
             frame_mutex.lock();
             count_curr = count_queue.front();
@@ -175,6 +204,10 @@ void t2_showframe(void)
             count_queue.pop();
             frame_queue.pop();
             frame_mutex.unlock();
+
+            if (count_curr != FRAME_SEQ) {
+                continue;
+            }
 
             fps_sum += (finish.tv_sec - start.tv_sec) * 1000 + (finish.tv_nsec - start.tv_nsec) / 1000000;
             err_sum += FRAME_SEQ - count_curr;
@@ -189,42 +222,51 @@ void t2_showframe(void)
                 err_sum = 0;
             }
 
-            string s = format("FPS:{:.1f}", fps / 10.0);
+            std::string s = std::format("FPS:{:.1f}", fps / 10.0);
             cv::putText(frame_buff, s.c_str(), cv::Point(10, 30), cv::FONT_HERSHEY_COMPLEX, 1.0, cv::Scalar(0, 255, 0), 2, 8, 0);
-            string e = format("ERR:{:.2f}%", err / 100.0);
+            std::string e = std::format("ERR:{:.2f}%", err / 100.0);
             cv::putText(frame_buff, e.c_str(), cv::Point(10, 60), cv::FONT_HERSHEY_COMPLEX, 1.0, cv::Scalar(0, 0, 255), 2, 8, 0);
 
             cv::imshow("Frame", frame_buff);
             cv::pollKey();
         } else {
+        #ifdef _WIN32
+            Sleep(1);
+        #else
             usleep(1000);
+        #endif
             continue;
         }
-
-        clock_gettime(CLOCK_REALTIME, &start);
     }
 
     cv::destroyWindow("Frame");
 
-    cout << "T2: 视频显示线程...关闭" << endl;
+    std::cout << "T2: 视频显示线程...关闭" << std::endl;
 }
 
 int main()
 {
+#ifdef _WIN32
+    SetConsoleOutputCP(CP_UTF8);
+#else
     signal(SIGINT, signal_handle);
     signal(SIGTERM, signal_handle);
+#endif
 
-    cout << "M : 视频处理进程...启动" << endl;
+    std::cout << "M : 视频处理进程...启动" << std::endl;
 
     running = true;
 
-    thread t1(t1_recvframe);
+    std::thread t1(t1_recvframe);
     t1.detach();
-    thread t2(t2_showframe);
+    std::thread t2(t2_showframe);
     t2.join();
-    t1.join();
 
-    cout << "M : 视频处理进程...关闭" << endl;
+    if (t1.joinable()) {
+        t1.join();
+    }
+
+    std::cout << "M : 视频处理进程...关闭" << std::endl;
 
     return 0;
 }
