@@ -37,10 +37,10 @@ void signal_handle(int signum)
     }
 }
 
-void rgb565_bgr888(uint8_t *dst, uint8_t *src, int size)
+void rgb565_bgr888(uint8_t *dst, const uint8_t *src, int size)
 {
     for (int i = 0; i < size; i++) {
-        uint16_t rgb565 = *src++ | (*src++ << 8);
+        uint16_t rgb565 = *src++ | (*src++ << 8); // (G[5:2] ... B[7:3]) | (R[7:3] ... G[7:5]) << 8
 
         dst[i * 3 + 0] = (rgb565 & 0x001f) << 3; // B
         dst[i * 3 + 1] = (rgb565 & 0x07e0) >> 3; // G
@@ -194,8 +194,8 @@ void t2_showframe(void)
             string e = format("ERR:{:.2f}%", err / 100.0);
             cv::putText(frame_buff, e.c_str(), cv::Point(10, 60), cv::FONT_HERSHEY_COMPLEX, 1.0, cv::Scalar(0, 0, 255), 2, 8, 0);
 
-            cv::waitKey(1);
             cv::imshow("Frame", frame_buff);
+            cv::pollKey();
         } else {
             usleep(1000);
             continue;

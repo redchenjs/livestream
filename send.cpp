@@ -12,12 +12,21 @@
 
 using namespace std;
 
-#define FRAME_CNT    (20)
-#define FRAME_PKT    (1442)
-#define FRAME_SEQ    (2880)
+#define FRAME_DLY     (50)
+#define FRAME_PKT     (1442)
+#define FRAME_SEQ     (2880)
 
-#define FRAME_WIDTH  (1920)
-#define FRAME_HEIGHT (1080)
+#define FRAME_WIDTH   (1920)
+#define FRAME_HEIGHT  (1080)
+
+#define COLOR_WHITE   (0xffffff)
+#define COLOR_BLACK   (0x000000)
+#define COLOR_BLUE    (0xff0000)
+#define COLOR_GREEN   (0x00ff00)
+#define COLOR_RED     (0x0000ff)
+#define COLOR_CYAN    (0xffff00)
+#define COLOR_YELLOW  (0x00ffff)
+#define COLOR_MAGENTA (0xff00ff)
 
 bool running = false;
 
@@ -36,15 +45,49 @@ void signal_handle(int signum)
     }
 }
 
-void bgr888_rgb565(uint8_t *dst, uint8_t *src, int size)
+void bgr888_rgb565(uint8_t *dst, const uint8_t *src, int size)
 {
     for (int i = 0; i < size; i++) {
-        uint8_t b = *src++;
-        uint8_t g = *src++;
-        uint8_t r = *src++;
+        uint8_t b = *src++; // B
+        uint8_t g = *src++; // G
+        uint8_t r = *src++; // R
 
-        dst[i * 2 + 0] = (r << 3) | (g >> 5);
-        dst[i * 2 + 1] = (g << 5) | (b >> 3);
+        dst[i * 2 + 1] = ((r >> 3) << 3) | (g >> 5); // R[7:3] ... G[7:5]
+        dst[i * 2 + 0] = ((g >> 2) << 5) | (b >> 3); // G[5:2] ... B[7:3]
+    }
+}
+
+void print_test_pattern(uint8_t *frame, uint32_t width, uint32_t height, uint32_t stride)
+{
+    uint32_t color = 0;
+    uint32_t start = 0;
+
+    for (uint32_t ycoi = 0; ycoi < height; ycoi++) {
+        for (uint32_t xcoi = 0; xcoi < (width * stride); xcoi += stride) {
+            if (width * stride / 8 * 1 > xcoi) {
+                color = COLOR_WHITE;
+            } else if (width * stride / 8 * 2 > xcoi) {
+                color = COLOR_YELLOW;
+            } else if (width * stride / 8 * 3 > xcoi) {
+                color = COLOR_CYAN;
+            } else if (width * stride / 8 * 4 > xcoi) {
+                color = COLOR_GREEN;
+            } else if (width * stride / 8 * 5 > xcoi) {
+                color = COLOR_MAGENTA;
+            } else if (width * stride / 8 * 6 > xcoi) {
+                color = COLOR_RED;
+            } else if (width * stride / 8 * 7 > xcoi) {
+                color = COLOR_BLUE;
+            } else {
+                color = COLOR_BLACK;
+            }
+
+            frame[start + xcoi + 0] = 0xff & (color >> 16); // B
+            frame[start + xcoi + 1] = 0xff & (color >> 8);  // G
+            frame[start + xcoi + 2] = 0xff & (color);       // R
+        }
+
+        start += width * stride;
     }
 }
 
@@ -55,15 +98,7 @@ void t1_genframe(void)
     cout << "T1: 视频生成线程...启动" << endl;
 
     while (running) {
-        vector<cv::Point> contour;
-        cv::Rect rec = cv::Rect(cv::Point(500,500), cv::Point(1000,1000));
-
-        contour.push_back(rec.tl());
-        contour.push_back(cv::Point(rec.tl().x + rec.width, rec.tl().y));
-        contour.push_back(cv::Point(rec.tl().x + rec.width, rec.tl().y + rec.height));
-        contour.push_back(cv::Point(rec.tl().x, rec.tl().y + rec.height));
-
-        cv::fillConvexPoly(frame_buff, contour, cv::Scalar(255, 255, 255));
+        print_test_pattern(frame_buff.data, FRAME_WIDTH, FRAME_HEIGHT, 3);
 
         if (frame_queue.empty()) {
             frame_mutex.lock();
@@ -71,7 +106,7 @@ void t1_genframe(void)
             frame_mutex.unlock();
         }
 
-        usleep(1000 * 50);
+        usleep(1000 * FRAME_DLY);
     }
 
     cout << "T1: 视频生成线程...关闭" << endl;
