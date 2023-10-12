@@ -9,8 +9,8 @@
 #include <sys/types.h>
 
 #ifdef _WIN32
-    #include <winsock.h>
-    #include <windows.h>
+    #include <ws2tcpip.h>
+    #pragma comment(lib, "ws2_32.lib")
 #else
     #include <netdb.h>
     #include <unistd.h>
@@ -27,6 +27,9 @@
 
 #define FRAME_WIDTH  (1920)
 #define FRAME_HEIGHT (1080)
+
+#define LISTEN_ADDR  "192.168.1.102"
+#define LISTEN_PORT  (8001)
 
 bool running = false;
 
@@ -67,9 +70,9 @@ void t1_recvframe(void)
 {
     int ret = 0;
     int sock_fd = 0;
-    socklen_t src_len = 0;
-    socklen_t rcv_opt = 16 * 1024 * 1024;
-    struct sockaddr_in src_addr = { 0 };
+    struct sockaddr_in sock_addr = { 0 };
+    socklen_t sock_opt = 16 * 1024 * 1024;
+    socklen_t sock_len = sizeof(sockaddr_in);
 
     uint16_t pkt_idx = 0;
     uint8_t  pkt_buff[FRAME_PKT] = {0};
@@ -78,32 +81,33 @@ void t1_recvframe(void)
     bool     frame_sync = false;
     cv::Mat  frame_buff(cv::Size(FRAME_WIDTH, FRAME_HEIGHT), CV_8UC3, cv::Scalar(0, 0, 0));
 
-    src_addr.sin_family = AF_INET;
-    src_addr.sin_addr.s_addr = inet_addr("192.168.1.102");
-    src_addr.sin_port = htons(8001);
-
     std::cout << "T1: 视频接收线程...启动" << std::endl;
 
+    sock_addr.sin_family = AF_INET;
+    sock_addr.sin_port = htons(LISTEN_PORT);
+
+    inet_pton(sock_addr.sin_family, LISTEN_ADDR, &sock_addr.sin_addr);
+
 #ifdef _WIN32
-    WSADATA wsaData = { 0 };
-    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-        printf("T1: 故障! WSA\n");
+    WSADATA wsa_data = { 0 };
+    if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0) {
+        std::cout << "T1: 故障！套接字未初始化" << std::endl;
         goto err_t1;
     }
 #endif
 
-    if ((sock_fd = ::socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-        printf("T1: 故障！无法创建套接字\n");
+    if ((sock_fd = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
+        std::cout << "T1: 故障！无法创建套接字" << std::endl;
         goto err_t1;
     }
 
-    if ((ret = ::setsockopt(sock_fd, SOL_SOCKET, SO_RCVBUF, (const char *)&rcv_opt, sizeof(rcv_opt))) < 0) {
-        printf("T1: 故障！无法设定缓冲区大小\n");
+    if ((ret = ::setsockopt(sock_fd, SOL_SOCKET, SO_RCVBUF, (const char *)&sock_opt, sizeof(sock_opt))) < 0) {
+        std::cout << "T1: 故障！无法设定缓冲区大小" << std::endl;
         goto err_t1s;
     };
 
-    if ((ret = ::bind(sock_fd, (sockaddr *)&src_addr, sizeof(src_addr))) < 0) {
-        printf("T1: 故障！无法绑定到指定端口\n");
+    if ((ret = ::bind(sock_fd, (const sockaddr *)&sock_addr, sizeof(sock_addr))) < 0) {
+        std::cout << "T1: 故障！无法绑定到指定端口" << std::endl;
         goto err_t1s;
     };
 
@@ -114,8 +118,9 @@ void t1_recvframe(void)
         count_curr = 0;
 
         while (true) {
-            if ((ret = ::recvfrom(sock_fd, pkt_buff, FRAME_PKT, 0, (sockaddr *)&src_addr, &src_len)) < 0) {
-                printf("T1: 故障！%s\n", strerror(errno));
+            if ((ret = ::recvfrom(sock_fd, (char *)pkt_buff, FRAME_PKT, 0, (sockaddr *)&sock_addr, &sock_len)) < 0) {
+                std::cout << "T1: 注意！无法读取套接字" << std::endl;
+                goto err_t1s;
             }
 
             pkt_idx_prev = pkt_idx;
@@ -123,7 +128,7 @@ void t1_recvframe(void)
 
             if ((pkt_idx == 0 && pkt_idx_prev != FRAME_SEQ - 1) ||
                 (pkt_idx != 0 && pkt_idx_prev != pkt_idx - 1)) {
-                printf("T1: 注意！数据包丢失：%d => %d\n", pkt_idx_prev, pkt_idx);
+                std::cout << std::format("T1: 注意！丢包：{:04d} => {:04d}", pkt_idx_prev, pkt_idx) << std::endl;
 
                 if (pkt_idx_prev >= pkt_idx) {
                     frame_sync = false;
@@ -145,8 +150,6 @@ void t1_recvframe(void)
 
             if (pkt_idx < FRAME_SEQ) {
                 rgb565_bgr888(frame_buff.data + pkt_idx * (FRAME_PKT - 2) * 3 / 2, pkt_buff + 2, (FRAME_PKT - 2) / 2);
-            } else {
-                printf("T1: 错误！数据包无效：%d\n", pkt_idx);
             }
 
             if (frame_sync && (pkt_idx == FRAME_SEQ - 1)) {
@@ -165,7 +168,13 @@ void t1_recvframe(void)
     }
 
 err_t1s:
+#ifdef _WIN32
+    closesocket(sock_fd);
+
+    WSACleanup();
+#else
     close(sock_fd);
+#endif
 
 err_t1:
     running = false;
@@ -177,8 +186,8 @@ void t2_showframe(void)
 {
     uint16_t update = 0;
     uint16_t count_curr = 0;
-    uint32_t fps = 0, fps_sum = 0;
-    uint32_t err = 0, err_sum = 0;
+    uint64_t fps = 0, fps_sum = 0;
+    uint64_t err = 0, err_sum = 0;
     struct timespec start  = {0, 0};
     struct timespec finish = {0, 0};
     cv::Mat frame_buff(cv::Size(FRAME_WIDTH, FRAME_HEIGHT), CV_8UC3, cv::Scalar(0, 0, 0));
@@ -206,6 +215,7 @@ void t2_showframe(void)
             frame_mutex.unlock();
 
             if (count_curr != FRAME_SEQ) {
+                std::cout << std::format("T2: 收到！丢帧：{:04d}", count_curr) << std::endl;
                 continue;
             }
 
@@ -215,10 +225,12 @@ void t2_showframe(void)
             if (update++ == FRAME_CNT + 2) {
                 update = 0;
 
-                fps = 10000.0 * FRAME_CNT / fps_sum;
-                err = err_sum * 10000 / FRAME_CNT / FRAME_SEQ;
+                if (fps_sum) {
+                    fps = 10000 * FRAME_CNT / fps_sum;
+                    fps_sum = 0;
+                }
 
-                fps_sum = 0;
+                err = err_sum * 10000 / FRAME_CNT / FRAME_SEQ;
                 err_sum = 0;
             }
 
@@ -244,7 +256,7 @@ void t2_showframe(void)
     std::cout << "T2: 视频显示线程...关闭" << std::endl;
 }
 
-int main()
+int main(void)
 {
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);

@@ -164,7 +164,7 @@ err_t2:
     cout << "T2: 视频发送线程...关闭" << endl;
 }
 
-int main()
+int main(void)
 {
     signal(SIGINT, signal_handle);
     signal(SIGTERM, signal_handle);
