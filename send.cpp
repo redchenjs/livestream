@@ -97,9 +97,9 @@ void t1_genframe(void)
 
     cout << "T1: 视频生成线程...启动" << endl;
 
-    while (running) {
-        print_test_pattern(frame_buff.data, FRAME_WIDTH, FRAME_HEIGHT, 3);
+    print_test_pattern(frame_buff.data, FRAME_WIDTH, FRAME_HEIGHT, 3);
 
+    while (running) {
         if (frame_queue.empty()) {
             frame_mutex.lock();
             frame_queue.push(frame_buff.clone());
