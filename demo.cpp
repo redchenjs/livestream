@@ -21,9 +21,9 @@
 
 #include <opencv2/opencv.hpp>
 
-#define FRAME_CNT    (20)
 #define FRAME_PKT    (1442)
 #define FRAME_SEQ    (2880)
+#define FRAME_CNT    (1000000)
 
 #define FRAME_WIDTH  (1920)
 #define FRAME_HEIGHT (1080)
@@ -32,6 +32,7 @@
 #define LISTEN_PORT  (8001)
 
 bool running = false;
+bool fullscreen = false;
 
 std::mutex           frame_mutex;
 std::queue<cv::Mat>  frame_queue;
@@ -60,9 +61,9 @@ void rgb565_bgr888(uint8_t *dst, const uint8_t *src, int size)
         rgb565 = ntohs(rgb565);
     #endif
 
-        dst[i * 3 + 0] = (rgb565 & 0x001f) << 3; // B
-        dst[i * 3 + 1] = (rgb565 & 0x07e0) >> 3; // G
-        dst[i * 3 + 2] = (rgb565 & 0xf800) >> 8; // R
+        dst[i * 3 + 0] = (((rgb565 & 0x001f) << 3) * 527 + 23) >> 6; // B
+        dst[i * 3 + 1] = (((rgb565 & 0x07e0) >> 3) * 259 + 33) >> 6; // G
+        dst[i * 3 + 2] = (((rgb565 & 0xf800) >> 8) * 527 + 23) >> 6; // R
     }
 }
 
@@ -128,11 +129,10 @@ void t1_recvframe(void)
 
             if ((pkt_idx == 0 && pkt_idx_prev != FRAME_SEQ - 1) ||
                 (pkt_idx != 0 && pkt_idx_prev != pkt_idx - 1)) {
-                std::cout << std::format("T1: 注意！丢包：{:04d} => {:04d}", pkt_idx_prev, pkt_idx) << std::endl;
+                std::cout << std::format("T1: 注意！跳包：{:04d} => {:04d}", pkt_idx_prev, pkt_idx) << std::endl;
 
                 if (pkt_idx_prev >= pkt_idx) {
-                    frame_sync = false;
-                    count_curr = 0;
+                    break;
                 }
             }
 
@@ -186,27 +186,20 @@ void t2_showframe(void)
 {
     uint16_t update = 0;
     uint16_t count_curr = 0;
-    uint64_t fps = 0, fps_sum = 0;
-    uint64_t err = 0, err_sum = 0;
-    struct timespec start  = {0, 0};
-    struct timespec finish = {0, 0};
+    uint64_t err = 0, err_cnt = 0;
+    uint64_t fps = 0, fps_cnt = 0, fps_rel = 0;
+    std::chrono::microseconds duration(0);
+    std::chrono::high_resolution_clock::time_point start, finish;
     cv::Mat frame_buff(cv::Size(FRAME_WIDTH, FRAME_HEIGHT), CV_8UC3, cv::Scalar(0, 0, 0));
 
     std::cout << "T2: 视频显示线程...启动" << std::endl;
 
-    cv::namedWindow("Frame", cv::WINDOW_NORMAL);
-    cv::setWindowProperty("Frame", cv::WND_PROP_FULLSCREEN, cv::WINDOW_FULLSCREEN);
+    cv::namedWindow("Frame", cv::WINDOW_NORMAL | cv::WINDOW_KEEPRATIO | cv::WINDOW_GUI_EXPANDED);
+
+    start = std::chrono::high_resolution_clock::now();
 
     while (running) {
-    #ifndef _WIN32
-        clock_gettime(CLOCK_REALTIME, &start);
-    #endif
-
         if (!frame_queue.empty()) {
-        #ifndef _WIN32
-            clock_gettime(CLOCK_REALTIME, &finish);
-        #endif
-
             frame_mutex.lock();
             count_curr = count_queue.front();
             frame_buff = frame_queue.front();
@@ -214,24 +207,28 @@ void t2_showframe(void)
             frame_queue.pop();
             frame_mutex.unlock();
 
+            err_cnt += FRAME_SEQ - count_curr;
+            fps_cnt += 1;
+
             if (count_curr != FRAME_SEQ) {
-                std::cout << std::format("T2: 收到！丢帧：{:04d}", count_curr) << std::endl;
+                std::cout << std::format("T2: 注意！丢帧：{:04d}", count_curr) << std::endl;
                 continue;
             }
 
-            fps_sum += (finish.tv_sec - start.tv_sec) * 1000 + (finish.tv_nsec - start.tv_nsec) / 1000000;
-            err_sum += FRAME_SEQ - count_curr;
+            fps_rel += 1;
 
-            if (update++ == FRAME_CNT + 2) {
-                update = 0;
+            finish    = std::chrono::high_resolution_clock::now();
+            duration += std::chrono::duration_cast<std::chrono::microseconds>(finish - start);
 
-                if (fps_sum) {
-                    fps = 10000 * FRAME_CNT / fps_sum;
-                    fps_sum = 0;
-                }
+            if (duration.count() >= FRAME_CNT) {
+                err = 100.0 * err_cnt * fps_cnt / FRAME_SEQ;
+                fps = 10.0 * FRAME_CNT * fps_rel / duration.count();
 
-                err = err_sum * 10000 / FRAME_CNT / FRAME_SEQ;
-                err_sum = 0;
+                duration = duration.zero();
+
+                err_cnt = 0;
+                fps_cnt = 0;
+                fps_rel = 0;
             }
 
             std::string s = std::format("FPS:{:.1f}", fps / 10.0);
@@ -240,13 +237,26 @@ void t2_showframe(void)
             cv::putText(frame_buff, e.c_str(), cv::Point(10, 60), cv::FONT_HERSHEY_COMPLEX, 1.0, cv::Scalar(0, 0, 255), 2, 8, 0);
 
             cv::imshow("Frame", frame_buff);
-            cv::pollKey();
+
+            start = std::chrono::high_resolution_clock::now();
+
+            switch (cv::pollKey() & 0xff) {
+            case 'q':
+            case 'Q':
+            case 0x1b:  // ESC
+                running = false;
+                break;
+            case 'f':
+            case 'F':
+                if (cv::getWindowProperty("Frame", cv::WND_PROP_FULLSCREEN) == cv::WINDOW_NORMAL) {
+                    cv::setWindowProperty("Frame", cv::WND_PROP_FULLSCREEN, cv::WINDOW_FULLSCREEN);
+                } else {
+                    cv::setWindowProperty("Frame", cv::WND_PROP_FULLSCREEN, cv::WINDOW_NORMAL);
+                }
+                break;
+            }
         } else {
-        #ifdef _WIN32
-            Sleep(1);
-        #else
-            usleep(1000);
-        #endif
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
             continue;
         }
     }
