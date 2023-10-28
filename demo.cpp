@@ -184,10 +184,9 @@ err_t1:
 
 void t2_showframe(void)
 {
-    uint16_t update = 0;
     uint16_t count_curr = 0;
-    uint64_t err = 0, err_cnt = 0;
-    uint64_t fps = 0, fps_cnt = 0, fps_rel = 0;
+    double err = 0.0, fps = 0.0;
+    uint64_t err_cnt = 0, fps_cnt = 0, fps_rel = 0;
     std::chrono::microseconds duration(0);
     std::chrono::high_resolution_clock::time_point start, finish;
     cv::Mat frame_buff(cv::Size(FRAME_WIDTH, FRAME_HEIGHT), CV_8UC3, cv::Scalar(0, 0, 0));
@@ -221,8 +220,12 @@ void t2_showframe(void)
             duration += std::chrono::duration_cast<std::chrono::microseconds>(finish - start);
 
             if (duration.count() >= FRAME_CNT) {
-                err = 100.0 * err_cnt * fps_cnt / FRAME_SEQ;
-                fps = 10.0 * FRAME_CNT * fps_rel / duration.count();
+                err = 100.0 * err_cnt / (FRAME_SEQ * fps_cnt);
+                fps = 1.0 * FRAME_CNT * fps_rel / duration.count();
+
+                if (err > 100.0) {
+                    err = 100.0;
+                }
 
                 duration = duration.zero();
 
@@ -231,9 +234,9 @@ void t2_showframe(void)
                 fps_rel = 0;
             }
 
-            std::string s = std::format("FPS:{:.1f}", fps / 10.0);
+            std::string s = std::format("FPS:{:.1f}", fps);
             cv::putText(frame_buff, s.c_str(), cv::Point(10, 30), cv::FONT_HERSHEY_COMPLEX, 1.0, cv::Scalar(0, 255, 0), 2, 8, 0);
-            std::string e = std::format("ERR:{:.2f}%", err / 100.0);
+            std::string e = std::format("ERR:{:.2f}%", err);
             cv::putText(frame_buff, e.c_str(), cv::Point(10, 60), cv::FONT_HERSHEY_COMPLEX, 1.0, cv::Scalar(0, 0, 255), 2, 8, 0);
 
             cv::imshow("Frame", frame_buff);
