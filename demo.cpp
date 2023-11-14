@@ -9,6 +9,7 @@
 #include <sys/types.h>
 
 #ifdef _WIN32
+    #include <direct.h>
     #include <ws2tcpip.h>
     #pragma comment(lib, "ws2_32.lib")
 #else
@@ -22,14 +23,18 @@
 #include <opencv2/opencv.hpp>
 
 #define FRAME_PKT    (1442)
-#define FRAME_SEQ    (2880)
+#define FRAME_SEQ    (1280)
 #define FRAME_CNT    (1000000)
 
-#define FRAME_WIDTH  (1920)
-#define FRAME_HEIGHT (1080)
+#define FRAME_WIDTH  (1280)
+#define FRAME_HEIGHT ( 720)
+#define FRAME_RATE   (  60)
 
-#define LISTEN_ADDR  "192.168.1.102"
+#define LISTEN_ADDR  "192.168.2.102"
 #define LISTEN_PORT  (8001)
+
+#define IMAGE_PATH  "Images/"
+#define VIDEO_PATH  "Videos/"
 
 bool running = false;
 bool fullscreen = false;
@@ -37,6 +42,8 @@ bool fullscreen = false;
 std::mutex           frame_mutex;
 std::queue<cv::Mat>  frame_queue;
 std::queue<uint16_t> count_queue;
+
+cv::VideoWriter video_writer;
 
 #ifndef _WIN32
     void signal_handle(int signum)
@@ -82,7 +89,7 @@ void t1_recvframe(void)
     bool     frame_sync = false;
     cv::Mat  frame_buff(cv::Size(FRAME_WIDTH, FRAME_HEIGHT), CV_8UC3, cv::Scalar(0, 0, 0));
 
-    std::cout << "T1: 视频接收线程...启动" << std::endl;
+    std::cout << "T1: 视频接收线程...启动\n";
 
     sock_addr.sin_family = AF_INET;
     sock_addr.sin_port = htons(LISTEN_PORT);
@@ -92,23 +99,23 @@ void t1_recvframe(void)
 #ifdef _WIN32
     WSADATA wsa_data = { 0 };
     if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0) {
-        std::cout << "T1: 故障！套接字未初始化" << std::endl;
+        std::cout << "T1: 故障！套接字未初始化\n";
         goto err_t1;
     }
 #endif
 
     if ((sock_fd = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
-        std::cout << "T1: 故障！无法创建套接字" << std::endl;
+        std::cout << "T1: 故障！无法创建套接字\n";
         goto err_t1;
     }
 
     if ((ret = ::setsockopt(sock_fd, SOL_SOCKET, SO_RCVBUF, (const char *)&sock_opt, sizeof(sock_opt))) < 0) {
-        std::cout << "T1: 故障！无法设定缓冲区大小" << std::endl;
+        std::cout << "T1: 故障！无法设定缓冲区大小\n";
         goto err_t1s;
     };
 
     if ((ret = ::bind(sock_fd, (const sockaddr *)&sock_addr, sizeof(sock_addr))) < 0) {
-        std::cout << "T1: 故障！无法绑定到指定端口" << std::endl;
+        std::cout << "T1: 故障！无法绑定到指定端口\n";
         goto err_t1s;
     };
 
@@ -120,7 +127,7 @@ void t1_recvframe(void)
 
         while (true) {
             if ((ret = ::recvfrom(sock_fd, (char *)pkt_buff, FRAME_PKT, 0, (sockaddr *)&sock_addr, &sock_len)) < 0) {
-                std::cout << "T1: 注意！无法读取套接字" << std::endl;
+                std::cout << "T1: 注意！无法读取套接字\n";
                 goto err_t1s;
             }
 
@@ -129,7 +136,7 @@ void t1_recvframe(void)
 
             if ((pkt_idx == 0 && pkt_idx_prev != FRAME_SEQ - 1) ||
                 (pkt_idx != 0 && pkt_idx_prev != pkt_idx - 1)) {
-                std::cout << std::format("T1: 注意！跳包：{:04d} => {:04d}", pkt_idx_prev, pkt_idx) << std::endl;
+                std::cout << std::format("\033[33mT1: 注意！跳包：{:04d} => {:04d}\033[0m\n", pkt_idx_prev, pkt_idx);
 
                 if (pkt_idx_prev >= pkt_idx) {
                     break;
@@ -179,19 +186,22 @@ err_t1s:
 err_t1:
     running = false;
 
-    std::cout << "T1: 视频接收线程...关闭" << std::endl;
+    std::cout << "T1: 视频接收线程...关闭\n";
 }
 
 void t2_showframe(void)
 {
+    bool video_cap = false;
+    uint16_t frame_curr = 0;
     uint16_t count_curr = 0;
     double err = 0.0, fps = 0.0;
     uint64_t err_cnt = 0, fps_cnt = 0, fps_rel = 0;
     std::chrono::microseconds duration(0);
     std::chrono::high_resolution_clock::time_point start, finish;
     cv::Mat frame_buff(cv::Size(FRAME_WIDTH, FRAME_HEIGHT), CV_8UC3, cv::Scalar(0, 0, 0));
+    cv::Mat frame_disp(cv::Size(FRAME_WIDTH, FRAME_HEIGHT), CV_8UC3, cv::Scalar(0, 0, 0));
 
-    std::cout << "T2: 视频显示线程...启动" << std::endl;
+    std::cout << "T2: 视频显示线程...启动\n";
 
     cv::namedWindow("Frame", cv::WINDOW_NORMAL | cv::WINDOW_KEEPRATIO | cv::WINDOW_GUI_EXPANDED);
 
@@ -209,8 +219,12 @@ void t2_showframe(void)
             err_cnt += FRAME_SEQ - count_curr;
             fps_cnt += 1;
 
+            if (++frame_curr > 9999) {
+                frame_curr = 1;
+            }
+
             if (count_curr != FRAME_SEQ) {
-                std::cout << std::format("T2: 注意！丢帧：{:04d}", count_curr) << std::endl;
+                std::cout << std::format("\033[31mT2: 注意！丢帧：{:04d} == {:04d}\033[0m\n", frame_curr, count_curr);
                 continue;
             }
 
@@ -234,29 +248,79 @@ void t2_showframe(void)
                 fps_rel = 0;
             }
 
-            std::string s = std::format("FPS:{:.1f}", fps);
-            cv::putText(frame_buff, s.c_str(), cv::Point(10, 30), cv::FONT_HERSHEY_COMPLEX, 1.0, cv::Scalar(0, 255, 0), 2, 8, 0);
-            std::string e = std::format("ERR:{:.2f}%", err);
-            cv::putText(frame_buff, e.c_str(), cv::Point(10, 60), cv::FONT_HERSHEY_COMPLEX, 1.0, cv::Scalar(0, 0, 255), 2, 8, 0);
+            frame_disp = frame_buff.clone();
 
-            cv::imshow("Frame", frame_buff);
+            std::string s = std::format("FPS:{:.1f}", fps);
+            cv::putText(frame_disp, s.c_str(), cv::Point(10, 30), cv::FONT_HERSHEY_COMPLEX, 1.0, cv::Scalar(0, 255, 0), 2, 8, 0);
+            std::string e = std::format("ERR:{:.2f}%", err);
+            cv::putText(frame_disp, e.c_str(), cv::Point(10, 60), cv::FONT_HERSHEY_COMPLEX, 1.0, cv::Scalar(0, 0, 255), 2, 8, 0);
+
+            cv::imshow("Frame", frame_disp);
 
             start = std::chrono::high_resolution_clock::now();
 
+        #ifdef _WIN32
+            SYSTEMTIME sys;
+            GetLocalTime(&sys);
+            char time_str[64] = { 0 };
+            snprintf(time_str, sizeof(time_str), "%4d%02d%02d.%02d%02d%02d.%03d", sys.wYear, sys.wMonth, sys.wDay, sys.wHour, sys.wMinute, sys.wSecond, sys.wMilliseconds);
+        #endif
+
             switch (cv::pollKey() & 0xff) {
-            case 'q':
-            case 'Q':
-            case 0x1b:  // ESC
-                running = false;
-                break;
-            case 'f':
-            case 'F':
-                if (cv::getWindowProperty("Frame", cv::WND_PROP_FULLSCREEN) == cv::WINDOW_NORMAL) {
-                    cv::setWindowProperty("Frame", cv::WND_PROP_FULLSCREEN, cv::WINDOW_FULLSCREEN);
-                } else {
-                    cv::setWindowProperty("Frame", cv::WND_PROP_FULLSCREEN, cv::WINDOW_NORMAL);
+                case 'q':
+                case 'Q':
+                case 0x1b:  // ESC
+                    running = false;
+                    break;
+                case 'f':
+                case 'F':
+                    if (cv::getWindowProperty("Frame", cv::WND_PROP_FULLSCREEN) == cv::WINDOW_NORMAL) {
+                        cv::setWindowProperty("Frame", cv::WND_PROP_FULLSCREEN, cv::WINDOW_FULLSCREEN);
+                    } else {
+                        cv::setWindowProperty("Frame", cv::WND_PROP_FULLSCREEN, cv::WINDOW_NORMAL);
+                    }
+                    break;
+                case 's':
+                case 'S': {
+                    std::string image_path = IMAGE_PATH + std::string(time_str) + ".jpg";
+                #ifdef _WIN32
+                    if (_mkdir(IMAGE_PATH)) {};
+                #else
+                    mkdir(IMAGE_PATH, 0777);
+                #endif
+                    cv::imwrite(image_path, frame_buff);
+                    std::cout << std::format("\033[32mT2: 截屏: {:s}\033[0m\n", image_path);
+                    break;
                 }
-                break;
+                case 'r':
+                case 'R': {
+                    static std::string video_path = "";
+
+                    if (video_cap) {
+                        video_cap = false;
+
+                        video_writer.release();
+                        std::cout << std::format("\033[32mT2: 停止录屏: {:s}\033[0m\n", video_path);
+                    }
+                    else {
+                        video_cap = true;
+
+                        video_path = VIDEO_PATH + std::string(time_str) + ".mp4";
+                    #ifdef _WIN32
+                        if (_mkdir(VIDEO_PATH)) {};
+                    #else
+                        mkdir(VIDEO_PATH, 0777);
+                    #endif
+
+                        std::cout << std::format("\033[32mT2: 启动录屏: {:s}\033[0m\n", video_path);
+                        video_writer.open(video_path, video_writer.fourcc('m', 'p', '4', 'v'), 60.0, cv::Size(FRAME_WIDTH, FRAME_HEIGHT), true);
+                    }
+                    break;
+                }
+            }
+
+            if (video_cap) {
+                video_writer << frame_buff;
             }
         } else {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -266,7 +330,7 @@ void t2_showframe(void)
 
     cv::destroyWindow("Frame");
 
-    std::cout << "T2: 视频显示线程...关闭" << std::endl;
+    std::cout << "T2: 视频显示线程...关闭\n";
 }
 
 int main(void)
@@ -278,7 +342,7 @@ int main(void)
     signal(SIGTERM, signal_handle);
 #endif
 
-    std::cout << "M : 视频处理进程...启动" << std::endl;
+    std::cout << "M : 视频处理进程...启动\n";
 
     running = true;
 
@@ -291,7 +355,7 @@ int main(void)
         t1.join();
     }
 
-    std::cout << "M : 视频处理进程...关闭" << std::endl;
+    std::cout << "M : 视频处理进程...关闭\n";
 
     return 0;
 }
