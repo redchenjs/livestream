@@ -20,6 +20,9 @@
     #include <netinet/in.h>
 #endif
 
+#define CVUI_IMPLEMENTATION
+#include "cvui.h"
+
 #include <opencv2/opencv.hpp>
 
 #define FRAME_PKT    (1442)
@@ -28,6 +31,7 @@
 
 #define FRAME_WIDTH  (1280)
 #define FRAME_HEIGHT ( 720)
+#define FRAME_DISP   (1440)
 #define FRAME_RATE   (  60)
 
 #define LISTEN_ADDR  "192.168.2.102"
@@ -196,14 +200,16 @@ void t2_showframe(void)
     uint16_t count_curr = 0;
     double err = 0.0, fps = 0.0;
     uint64_t err_cnt = 0, fps_cnt = 0, fps_rel = 0;
+    std::string image_time = "", video_time = "";
     std::chrono::microseconds duration(0);
     std::chrono::high_resolution_clock::time_point start, finish;
     cv::Mat frame_buff(cv::Size(FRAME_WIDTH, FRAME_HEIGHT), CV_8UC3, cv::Scalar(0, 0, 0));
-    cv::Mat frame_disp(cv::Size(FRAME_WIDTH, FRAME_HEIGHT), CV_8UC3, cv::Scalar(0, 0, 0));
+    cv::Mat frame_disp(cv::Size(FRAME_DISP,  FRAME_HEIGHT), CV_8UC3, cv::Scalar(0, 0, 0));
 
     std::cout << "T2: 视频显示线程...启动\n";
 
     cv::namedWindow("Frame", cv::WINDOW_NORMAL | cv::WINDOW_KEEPRATIO | cv::WINDOW_GUI_EXPANDED);
+    cvui::init("Frame");
 
     start = std::chrono::high_resolution_clock::now();
 
@@ -248,16 +254,52 @@ void t2_showframe(void)
                 fps_rel = 0;
             }
 
-            frame_disp = frame_buff.clone();
+            for (int i = 0; i < FRAME_HEIGHT; i++) {
+                memcpy(frame_disp.data + i * FRAME_DISP * 3, frame_buff.data + i* FRAME_WIDTH * 3, FRAME_WIDTH * 3);
+            }
+
+            cv::rectangle(frame_disp, cv::Point(0, 0), cv::Point(FRAME_WIDTH - 1, FRAME_HEIGHT - 1), cv::Scalar(255, 255, 255), 1);
+            cv::rectangle(frame_disp, cv::Point(FRAME_WIDTH, 0), cv::Point(FRAME_DISP - 1, FRAME_HEIGHT - 1), cv::Scalar(0, 0, 0), cv::FILLED);
+            cv::rectangle(frame_disp, cv::Point(FRAME_WIDTH - 1, 0), cv::Point(FRAME_DISP - 1, FRAME_HEIGHT / 2 - 1), cv::Scalar(255, 255, 255), 1);
+            cv::rectangle(frame_disp, cv::Point(FRAME_WIDTH - 1, FRAME_HEIGHT / 2 - 1), cv::Point(FRAME_DISP - 1, FRAME_HEIGHT - 1), cv::Scalar(255, 255, 255), 1);
+            cvui::printf(frame_disp, 1292, 20, 0.5, 0xffffff, "Video Screenshot");
+            cvui::printf(frame_disp, 1300, 380, 0.5, 0xffffff, "Video Recorder");
+
+            if (image_time != "") {
+                cvui::printf(frame_disp, 1340, 210, 0.4, 0x00ff00, "Saved");
+                cvui::printf(frame_disp, 1350, 284, 0.4, 0xffffff, "File:");
+                cvui::printf(frame_disp, 1290, 304, 0.4, 0xffffff, "%s", image_time.c_str());
+                cvui::printf(frame_disp, 1350, 324, 0.4, 0xffffff, ".jpg");
+            }
+
+            if (video_time != "") {
+                if (video_cap) {
+                    // Top-Left
+                    cv::line(frame_disp, cv::Point(2, 2), cv::Point(2, 100), cv::Scalar(0, 255, 0), 2);
+                    cv::line(frame_disp, cv::Point(2, 2), cv::Point(100, 2), cv::Scalar(0, 255, 0), 2);
+                    // Top-Right
+                    cv::line(frame_disp, cv::Point(FRAME_WIDTH - 3, 2), cv::Point(FRAME_WIDTH - 3, 100), cv::Scalar(0, 255, 0), 2);
+                    cv::line(frame_disp, cv::Point(FRAME_WIDTH - 3, 2), cv::Point(FRAME_WIDTH - 3 - 100, 2), cv::Scalar(0, 255, 0), 2);
+                    // Bottom-Left
+                    cv::line(frame_disp, cv::Point(2, FRAME_HEIGHT - 3), cv::Point(2, FRAME_HEIGHT - 1 - 100), cv::Scalar(0, 255, 0), 2);
+                    cv::line(frame_disp, cv::Point(2, FRAME_HEIGHT - 3), cv::Point(100, FRAME_HEIGHT - 3), cv::Scalar(0, 255, 0), 2);
+                    // Bottom-Right
+                    cv::line(frame_disp, cv::Point(FRAME_WIDTH - 3, FRAME_HEIGHT - 3), cv::Point(FRAME_WIDTH - 3, FRAME_HEIGHT - 3 - 100), cv::Scalar(0, 255, 0), 2);
+                    cv::line(frame_disp, cv::Point(FRAME_WIDTH - 3, FRAME_HEIGHT - 3), cv::Point(FRAME_WIDTH - 3 - 100, FRAME_HEIGHT - 3), cv::Scalar(0, 255, 0), 2);
+
+                    cvui::printf(frame_disp, 1330, 570, 0.4, 0xffff00, "Recording");
+                } else {
+                    cvui::printf(frame_disp, 1340, 570, 0.4, 0x00ff00, "Saved");
+                }
+                cvui::printf(frame_disp, 1350, 644, 0.4, 0xffffff, "File:");
+                cvui::printf(frame_disp, 1290, 664, 0.4, 0xffffff, "%s", video_time.c_str());
+                cvui::printf(frame_disp, 1345, 684, 0.4, 0xffffff, ".mp4");
+            }
 
             std::string s = std::format("FPS:{:.1f}", fps);
-            cv::putText(frame_disp, s.c_str(), cv::Point(10, 30), cv::FONT_HERSHEY_COMPLEX, 1.0, cv::Scalar(0, 255, 0), 2, 8, 0);
+            cv::putText(frame_disp, s.c_str(), cv::Point(10, 35), cv::FONT_HERSHEY_COMPLEX, 1.0, cv::Scalar(0, 255, 0), 2, 8, 0);
             std::string e = std::format("ERR:{:.2f}%", err);
-            cv::putText(frame_disp, e.c_str(), cv::Point(10, 60), cv::FONT_HERSHEY_COMPLEX, 1.0, cv::Scalar(0, 0, 255), 2, 8, 0);
-
-            cv::imshow("Frame", frame_disp);
-
-            start = std::chrono::high_resolution_clock::now();
+            cv::putText(frame_disp, e.c_str(), cv::Point(10, 70), cv::FONT_HERSHEY_COMPLEX, 1.0, cv::Scalar(0, 0, 255), 2, 8, 0);
 
         #ifdef _WIN32
             SYSTEMTIME sys;
@@ -266,57 +308,53 @@ void t2_showframe(void)
             snprintf(time_str, sizeof(time_str), "%4d%02d%02d.%02d%02d%02d.%03d", sys.wYear, sys.wMonth, sys.wDay, sys.wHour, sys.wMinute, sys.wSecond, sys.wMilliseconds);
         #endif
 
+            if (cvui::button(frame_disp, 1330, 150, "Save")) {
+                image_time = std::string(time_str);
+                std::string image_path = IMAGE_PATH + image_time + ".jpg";
+            #ifdef _WIN32
+                if (_mkdir(IMAGE_PATH)) {};
+            #else
+                mkdir(IMAGE_PATH, 0777);
+            #endif
+                cv::imwrite(image_path, frame_buff);
+                std::cout << std::format("\033[32mT2: 截屏: {:s}\033[0m\n", image_path);
+            }
+
+            if (cvui::button(frame_disp, 1330, 510, "Save")) {
+                static std::string video_path = "";
+
+                if (video_cap) {
+                    video_cap = false;
+
+                    video_writer.release();
+                    std::cout << std::format("\033[32mT2: 停止录屏: {:s}\033[0m\n", video_path);
+                } else {
+                    video_cap = true;
+
+                    video_time = std::string(time_str);
+                    video_path = VIDEO_PATH + video_time + ".mp4";
+                #ifdef _WIN32
+                    if (_mkdir(VIDEO_PATH)) {};
+                #else
+                    mkdir(VIDEO_PATH, 0777);
+                #endif
+
+                    std::cout << std::format("\033[32mT2: 启动录屏: {:s}\033[0m\n", video_path);
+                    video_writer.open(video_path, video_writer.fourcc('m', 'p', '4', 'v'), 60.0, cv::Size(FRAME_WIDTH, FRAME_HEIGHT), true);
+                }
+            }
+
+            cvui::update();
+            cvui::imshow("Frame", frame_disp);
+
+            start = std::chrono::high_resolution_clock::now();
+
             switch (cv::pollKey() & 0xff) {
                 case 'q':
                 case 'Q':
                 case 0x1b:  // ESC
                     running = false;
                     break;
-                case 'f':
-                case 'F':
-                    if (cv::getWindowProperty("Frame", cv::WND_PROP_FULLSCREEN) == cv::WINDOW_NORMAL) {
-                        cv::setWindowProperty("Frame", cv::WND_PROP_FULLSCREEN, cv::WINDOW_FULLSCREEN);
-                    } else {
-                        cv::setWindowProperty("Frame", cv::WND_PROP_FULLSCREEN, cv::WINDOW_NORMAL);
-                    }
-                    break;
-                case 's':
-                case 'S': {
-                    std::string image_path = IMAGE_PATH + std::string(time_str) + ".jpg";
-                #ifdef _WIN32
-                    if (_mkdir(IMAGE_PATH)) {};
-                #else
-                    mkdir(IMAGE_PATH, 0777);
-                #endif
-                    cv::imwrite(image_path, frame_buff);
-                    std::cout << std::format("\033[32mT2: 截屏: {:s}\033[0m\n", image_path);
-                    break;
-                }
-                case 'r':
-                case 'R': {
-                    static std::string video_path = "";
-
-                    if (video_cap) {
-                        video_cap = false;
-
-                        video_writer.release();
-                        std::cout << std::format("\033[32mT2: 停止录屏: {:s}\033[0m\n", video_path);
-                    }
-                    else {
-                        video_cap = true;
-
-                        video_path = VIDEO_PATH + std::string(time_str) + ".mp4";
-                    #ifdef _WIN32
-                        if (_mkdir(VIDEO_PATH)) {};
-                    #else
-                        mkdir(VIDEO_PATH, 0777);
-                    #endif
-
-                        std::cout << std::format("\033[32mT2: 启动录屏: {:s}\033[0m\n", video_path);
-                        video_writer.open(video_path, video_writer.fourcc('m', 'p', '4', 'v'), 60.0, cv::Size(FRAME_WIDTH, FRAME_HEIGHT), true);
-                    }
-                    break;
-                }
             }
 
             if (video_cap) {
