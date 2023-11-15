@@ -195,6 +195,7 @@ err_t1:
 
 void t2_showframe(void)
 {
+    bool ret = false;
     bool video_cap = false;
     uint16_t frame_curr = 0;
     uint16_t count_curr = 0;
@@ -266,10 +267,10 @@ void t2_showframe(void)
             cvui::printf(frame_disp, 1300, 380, 0.5, 0xffffff, "Video Recorder");
 
             if (image_time != "") {
-                cvui::printf(frame_disp, 1340, 210, 0.4, 0x00ff00, "Saved");
+                cvui::printf(frame_disp, 1337, 210, 0.5, 0x00ff00, "Saved");
                 cvui::printf(frame_disp, 1350, 284, 0.4, 0xffffff, "File:");
-                cvui::printf(frame_disp, 1290, 304, 0.4, 0xffffff, "%s", image_time.c_str());
-                cvui::printf(frame_disp, 1350, 324, 0.4, 0xffffff, ".jpg");
+                cvui::printf(frame_disp, 1287, 304, 0.4, 0xffffff, "%s", image_time.c_str());
+                cvui::printf(frame_disp, 1348, 324, 0.4, 0xffffff, ".jpg");
             }
 
             if (video_time != "") {
@@ -287,12 +288,12 @@ void t2_showframe(void)
                     cv::line(frame_disp, cv::Point(FRAME_WIDTH - 3, FRAME_HEIGHT - 3), cv::Point(FRAME_WIDTH - 3, FRAME_HEIGHT - 3 - 100), cv::Scalar(0, 255, 0), 2);
                     cv::line(frame_disp, cv::Point(FRAME_WIDTH - 3, FRAME_HEIGHT - 3), cv::Point(FRAME_WIDTH - 3 - 100, FRAME_HEIGHT - 3), cv::Scalar(0, 255, 0), 2);
 
-                    cvui::printf(frame_disp, 1330, 570, 0.4, 0xffff00, "Recording");
+                    cvui::printf(frame_disp, 1321, 570, 0.5, 0xffff00, "Recording");
                 } else {
-                    cvui::printf(frame_disp, 1340, 570, 0.4, 0x00ff00, "Saved");
+                    cvui::printf(frame_disp, 1337, 570, 0.5, 0x00ff00, "Saved");
                 }
                 cvui::printf(frame_disp, 1350, 644, 0.4, 0xffffff, "File:");
-                cvui::printf(frame_disp, 1290, 664, 0.4, 0xffffff, "%s", video_time.c_str());
+                cvui::printf(frame_disp, 1287, 664, 0.4, 0xffffff, "%s", video_time.c_str());
                 cvui::printf(frame_disp, 1345, 684, 0.4, 0xffffff, ".mp4");
             }
 
@@ -308,7 +309,7 @@ void t2_showframe(void)
             snprintf(time_str, sizeof(time_str), "%4d%02d%02d.%02d%02d%02d.%03d", sys.wYear, sys.wMonth, sys.wDay, sys.wHour, sys.wMinute, sys.wSecond, sys.wMilliseconds);
         #endif
 
-            if (cvui::button(frame_disp, 1330, 150, "Save")) {
+            if (cvui::button(frame_disp, 1323, 148, "Save", 0.5)) {
                 image_time = std::string(time_str);
                 std::string image_path = IMAGE_PATH + image_time + ".jpg";
             #ifdef _WIN32
@@ -320,7 +321,13 @@ void t2_showframe(void)
                 std::cout << std::format("\033[32mT2: 截屏: {:s}\033[0m\n", image_path);
             }
 
-            if (cvui::button(frame_disp, 1330, 510, "Save")) {
+            if (video_cap) {
+                ret = cvui::button(frame_disp, 1323, 503, "Stop", 0.5);
+            } else {
+                ret = cvui::button(frame_disp, 1323, 503, "Save", 0.5);
+            }
+
+            if (ret) {
                 static std::string video_path = "";
 
                 if (video_cap) {
