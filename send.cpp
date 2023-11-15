@@ -14,10 +14,10 @@ using namespace std;
 
 #define FRAME_DLY     (50)
 #define FRAME_PKT     (1442)
-#define FRAME_SEQ     (2880)
+#define FRAME_SEQ     (1280)
 
-#define FRAME_WIDTH   (1920)
-#define FRAME_HEIGHT  (1080)
+#define FRAME_WIDTH   (1280)
+#define FRAME_HEIGHT  ( 720)
 
 #define COLOR_WHITE   (0xffffff)
 #define COLOR_BLACK   (0x000000)
@@ -124,7 +124,7 @@ void t2_sendframe(void)
     cv::Mat frame_buff(cv::Size(FRAME_WIDTH, FRAME_HEIGHT), CV_8UC3, cv::Scalar(0, 0, 0));
 
     dst_addr.sin_family = AF_INET;
-    dst_addr.sin_addr.s_addr = inet_addr("192.168.1.102");
+    dst_addr.sin_addr.s_addr = inet_addr("192.168.2.102");
     dst_addr.sin_port = htons(8001);
 
     cout << "T2: 视频发送线程...启动" << endl;

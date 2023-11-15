@@ -21,10 +21,9 @@
     #include <netinet/in.h>
 #endif
 
+#include <opencv2/opencv.hpp>
 #define CVUI_IMPLEMENTATION
 #include "cvui.h"
-
-#include <opencv2/opencv.hpp>
 
 #define FRAME_PKT    (1442)
 #define FRAME_SEQ    (1280)
@@ -211,7 +210,9 @@ void t2_showframe(void)
 
     std::cout << "T2: 视频显示线程...启动\n";
 
-    cv::namedWindow("Frame", cv::WINDOW_NORMAL | cv::WINDOW_KEEPRATIO | cv::WINDOW_GUI_EXPANDED);
+    cv::namedWindow("Frame", cv::WINDOW_NORMAL);
+    cv::resizeWindow("Frame", FRAME_DISP, FRAME_HEIGHT);
+
     cvui::init("Frame");
 
     start = std::chrono::high_resolution_clock::now();
@@ -308,6 +309,16 @@ void t2_showframe(void)
             SYSTEMTIME sys;
             GetLocalTime(&sys);
             snprintf(time_str, sizeof(time_str), "%4d%02d%02d.%02d%02d%02d.%03d", sys.wYear, sys.wMonth, sys.wDay, sys.wHour, sys.wMinute, sys.wSecond, sys.wMilliseconds);
+        #else
+            char time_tmp[64] = {0};
+            struct timeval cur_time;
+            gettimeofday(&cur_time, NULL);
+            int ms = cur_time.tv_usec / 1000;
+
+            struct tm local_time;
+            localtime_r(&cur_time.tv_sec, &local_time);
+            strftime(time_tmp, sizeof(time_tmp), "%Y%m%d.%H%M%S", &local_time);
+            snprintf(time_str, sizeof(time_str), "%s.%03d", time_tmp, ms);
         #endif
 
             if (cvui::button(frame_disp, 1323, 148, "Save", 0.5)) {
