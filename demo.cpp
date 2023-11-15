@@ -6,6 +6,7 @@
 
 #include <time.h>
 #include <signal.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 
 #ifdef _WIN32
@@ -199,6 +200,7 @@ void t2_showframe(void)
     bool video_cap = false;
     uint16_t frame_curr = 0;
     uint16_t count_curr = 0;
+    char time_str[64] = { 0 };
     double err = 0.0, fps = 0.0;
     uint64_t err_cnt = 0, fps_cnt = 0, fps_rel = 0;
     std::string image_time = "", video_time = "";
@@ -305,7 +307,6 @@ void t2_showframe(void)
         #ifdef _WIN32
             SYSTEMTIME sys;
             GetLocalTime(&sys);
-            char time_str[64] = { 0 };
             snprintf(time_str, sizeof(time_str), "%4d%02d%02d.%02d%02d%02d.%03d", sys.wYear, sys.wMonth, sys.wDay, sys.wHour, sys.wMinute, sys.wSecond, sys.wMilliseconds);
         #endif
 
@@ -313,7 +314,7 @@ void t2_showframe(void)
                 image_time = std::string(time_str);
                 std::string image_path = IMAGE_PATH + image_time + ".jpg";
             #ifdef _WIN32
-                if (_mkdir(IMAGE_PATH)) {};
+                ret = _mkdir(IMAGE_PATH);
             #else
                 mkdir(IMAGE_PATH, 0777);
             #endif
@@ -341,7 +342,7 @@ void t2_showframe(void)
                     video_time = std::string(time_str);
                     video_path = VIDEO_PATH + video_time + ".mp4";
                 #ifdef _WIN32
-                    if (_mkdir(VIDEO_PATH)) {};
+                    ret = _mkdir(IMAGE_PATH);
                 #else
                     mkdir(VIDEO_PATH, 0777);
                 #endif
