@@ -353,7 +353,7 @@ void t2_showframe(void)
                     video_time = std::string(time_str);
                     video_path = VIDEO_PATH + video_time + ".mp4";
                 #ifdef _WIN32
-                    ret = _mkdir(IMAGE_PATH);
+                    ret = _mkdir(VIDEO_PATH);
                 #else
                     mkdir(VIDEO_PATH, 0777);
                 #endif
