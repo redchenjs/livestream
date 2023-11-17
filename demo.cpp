@@ -63,18 +63,18 @@ cv::VideoWriter video_writer;
     }
 #endif
 
-void rgb565_bgr888(uint8_t *dst, const uint8_t *src, int size)
+void rgb565_bgr888(uint8_t *dst, const uint16_t *src, int size)
 {
     for (int i = 0; i < size; i++) {
-        uint16_t rgb565 = *src++ | (*src++ << 8); // (G[5:2] ... B[7:3]) | (R[7:3] ... G[7:5]) << 8
+        uint16_t rgb565 = ntohs(*src++); // {R[7:3], G[7:2], B[7:3]}
 
-    #ifdef _WIN32
-        rgb565 = ntohs(rgb565);
-    #endif
+        uint8_t b = (rgb565 & 0x001f) << 3;
+        uint8_t g = (rgb565 & 0x07e0) >> 3;
+        uint8_t r = (rgb565 & 0xf800) >> 8;
 
-        dst[i * 3 + 0] = (((rgb565 & 0x001f) << 3) * 527 + 23) >> 6; // B
-        dst[i * 3 + 1] = (((rgb565 & 0x07e0) >> 3) * 259 + 33) >> 6; // G
-        dst[i * 3 + 2] = (((rgb565 & 0xf800) >> 8) * 527 + 23) >> 6; // R
+        dst[i * 3 + 0] = b | (b >> 5); // B
+        dst[i * 3 + 1] = g | (g >> 6); // G
+        dst[i * 3 + 2] = r | (r >> 5); // R
     }
 }
 
@@ -160,7 +160,7 @@ void t1_recvframe(void)
             count_curr++;
 
             if (pkt_idx < FRAME_SEQ) {
-                rgb565_bgr888(frame_buff.data + pkt_idx * (FRAME_PKT - 2) * 3 / 2, pkt_buff + 2, (FRAME_PKT - 2) / 2);
+                rgb565_bgr888(frame_buff.data + pkt_idx * (FRAME_PKT - 2) * 3 / 2, (uint16_t *)(pkt_buff + 2), (FRAME_PKT - 2) / 2);
             }
 
             if (frame_sync && (pkt_idx == FRAME_SEQ - 1)) {
