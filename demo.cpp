@@ -129,7 +129,7 @@ void t1_recvframe(void)
         frame_sync = false;
         count_curr = 0;
 
-        while (true) {
+        while (running) {
             if ((ret = ::recvfrom(sock_fd, (char *)pkt_buff, FRAME_PKT, 0, (sockaddr *)&sock_addr, &sock_len)) < 0) {
                 std::cout << "T1: 注意！无法读取套接字\n";
                 goto err_t1s;
@@ -368,24 +368,28 @@ void t2_showframe(void)
 
             start = std::chrono::high_resolution_clock::now();
 
+            if (video_cap) {
+                video_writer << frame_buff;
+            }
+
             switch (cv::pollKey() & 0xff) {
                 case 'q':
                 case 'Q':
                 case 0x1b:  // ESC
+                    cv::destroyWindow("Frame");
                     running = false;
                     break;
             }
 
-            if (video_cap) {
-                video_writer << frame_buff;
+            if (cv::getWindowProperty("Frame", cv::WND_PROP_VISIBLE) == 0) {
+                running = false;
+                continue;
             }
         } else {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
             continue;
         }
     }
-
-    cv::destroyWindow("Frame");
 
     std::cout << "T2: 视频显示线程...关闭\n";
 }
