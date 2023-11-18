@@ -72,9 +72,9 @@ void rgb565_bgr888(uint8_t *dst, const uint16_t *src, int size)
         uint8_t g = (rgb565 & 0x07e0) >> 3;
         uint8_t r = (rgb565 & 0xf800) >> 8;
 
-        dst[i * 3 + 0] = b | (b >> 5); // B
-        dst[i * 3 + 1] = g | (g >> 6); // G
-        dst[i * 3 + 2] = r | (r >> 5); // R
+        dst[i * 3 + 0] = ((b >> 3) * 527 + 23) >> 6; // B
+        dst[i * 3 + 1] = ((g >> 2) * 259 + 33) >> 6; // G
+        dst[i * 3 + 2] = ((r >> 3) * 527 + 23) >> 6; // R
     }
 }
 
@@ -273,7 +273,7 @@ void t2_showframe(void)
                 cvui::printf(frame_disp, 1337, 210, 0.5, 0x00ff00, "Saved");
                 cvui::printf(frame_disp, 1350, 284, 0.4, 0xffffff, "File:");
                 cvui::printf(frame_disp, 1287, 304, 0.4, 0xffffff, "%s", image_time.c_str());
-                cvui::printf(frame_disp, 1348, 324, 0.4, 0xffffff, ".bmp");
+                cvui::printf(frame_disp, 1345, 324, 0.4, 0xffffff, ".bmp");
             }
 
             if (video_time != "") {
