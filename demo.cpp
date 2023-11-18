@@ -273,7 +273,7 @@ void t2_showframe(void)
                 cvui::printf(frame_disp, 1337, 210, 0.5, 0x00ff00, "Saved");
                 cvui::printf(frame_disp, 1350, 284, 0.4, 0xffffff, "File:");
                 cvui::printf(frame_disp, 1287, 304, 0.4, 0xffffff, "%s", image_time.c_str());
-                cvui::printf(frame_disp, 1348, 324, 0.4, 0xffffff, ".jpg");
+                cvui::printf(frame_disp, 1348, 324, 0.4, 0xffffff, ".bmp");
             }
 
             if (video_time != "") {
@@ -323,7 +323,7 @@ void t2_showframe(void)
 
             if (cvui::button(frame_disp, 1323, 148, "Save", 0.5)) {
                 image_time = std::string(time_str);
-                std::string image_path = IMAGE_PATH + image_time + ".jpg";
+                std::string image_path = IMAGE_PATH + image_time + ".bmp";
             #ifdef _WIN32
                 ret = _mkdir(IMAGE_PATH);
             #else
