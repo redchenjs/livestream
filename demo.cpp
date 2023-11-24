@@ -78,6 +78,17 @@ void rgb565_bgr888(uint8_t *dst, const uint16_t *src, int size)
     }
 }
 
+void gray_bgr888(uint8_t *dst, const uint8_t *src, int size)
+{
+    for (int i = 0; i < size; i++) {
+        uint8_t y = *src++;
+
+        dst[i * 3 + 0] = y; // B
+        dst[i * 3 + 1] = y; // G
+        dst[i * 3 + 2] = y; // R
+    }
+}
+
 void t1_recvframe(void)
 {
     int ret = 0;
@@ -87,9 +98,11 @@ void t1_recvframe(void)
     socklen_t sock_len = sizeof(sockaddr_in);
 
     uint16_t pkt_idx = 0;
+    uint16_t pkt_max = 0;
     uint8_t  pkt_buff[FRAME_PKT] = {0};
 
     uint16_t count_curr = 0;
+    bool     frame_mode = false;
     bool     frame_sync = false;
     cv::Mat  frame_buff(cv::Size(FRAME_WIDTH, FRAME_HEIGHT), CV_8UC3, cv::Scalar(0, 0, 0));
 
@@ -135,10 +148,13 @@ void t1_recvframe(void)
                 goto err_t1s;
             }
 
-            pkt_idx_prev = pkt_idx;
-            pkt_idx = pkt_buff[0] << 8 | pkt_buff[1];
+            frame_mode = (pkt_buff[0] & 0x80) > 0;
 
-            if ((pkt_idx == 0 && pkt_idx_prev != FRAME_SEQ - 1) ||
+            pkt_idx_prev = pkt_idx;
+            pkt_idx = (pkt_buff[0] << 8 | pkt_buff[1]) & 0x7fff;
+            pkt_max = frame_mode ? FRAME_SEQ / 2 : FRAME_SEQ;
+
+            if ((pkt_idx == 0 && pkt_idx_prev != pkt_max - 1) ||
                 (pkt_idx != 0 && pkt_idx_prev != pkt_idx - 1)) {
                 std::cout << std::format("\033[33mT1: 注意！跳包：{:04d} => {:04d}\033[0m\n", pkt_idx_prev, pkt_idx);
 
@@ -159,18 +175,22 @@ void t1_recvframe(void)
 
             count_curr++;
 
-            if (pkt_idx < FRAME_SEQ) {
-                rgb565_bgr888(frame_buff.data + pkt_idx * (FRAME_PKT - 2) * 3 / 2, (uint16_t *)(pkt_buff + 2), (FRAME_PKT - 2) / 2);
+            if (pkt_idx < pkt_max) {
+                if (frame_mode) {
+                    gray_bgr888(frame_buff.data + pkt_idx * (FRAME_PKT - 2) * 3, pkt_buff + 2, FRAME_PKT - 2);
+                } else {
+                    rgb565_bgr888(frame_buff.data + pkt_idx * (FRAME_PKT - 2) * 3 / 2, (uint16_t *)(pkt_buff + 2), (FRAME_PKT - 2) / 2);
+                }
             }
 
-            if (frame_sync && (pkt_idx == FRAME_SEQ - 1)) {
+            if (frame_sync && (pkt_idx == pkt_max - 1)) {
                 break;
             }
         }
 
         if (frame_queue.empty()) {
             frame_mutex.lock();
-            count_queue.push(count_curr);
+            count_queue.push(frame_mode ? (count_curr | 0x8000) : count_curr);
             frame_queue.push(frame_buff.clone());
             frame_mutex.unlock();
         }
@@ -197,12 +217,21 @@ void t2_showframe(void)
 {
     bool ret = false;
     bool video_cap = false;
-    uint16_t frame_curr = 0;
+
     uint16_t count_curr = 0;
-    char time_str[64] = { 0 };
-    double err = 0.0, fps = 0.0;
-    uint64_t err_cnt = 0, fps_cnt = 0, fps_rel = 0;
-    std::string image_time = "", video_time = "";
+    uint16_t frame_curr = 0;
+    bool     frame_mode = false;
+
+    double err = 0.0;
+    double fps = 0.0;
+    uint16_t pkt_max = 0;
+    uint64_t err_cnt = 0;
+    uint64_t fps_cnt = 0;
+    uint64_t fps_rel = 0;
+    std::string image_time = "";
+    std::string video_time = "";
+    char        time_str[64] = { 0 };
+
     std::chrono::microseconds duration(0);
     std::chrono::high_resolution_clock::time_point start, finish;
     cv::Mat frame_buff(cv::Size(FRAME_WIDTH, FRAME_HEIGHT), CV_8UC3, cv::Scalar(0, 0, 0));
@@ -226,14 +255,19 @@ void t2_showframe(void)
             frame_queue.pop();
             frame_mutex.unlock();
 
-            err_cnt += FRAME_SEQ - count_curr;
+            frame_mode = (count_curr & 0x8000) > 0;
+            count_curr =  count_curr & 0x7fff;
+
+            pkt_max = frame_mode ? FRAME_SEQ / 2 : FRAME_SEQ;
+
+            err_cnt += pkt_max - count_curr;
             fps_cnt += 1;
 
             if (++frame_curr > 9999) {
                 frame_curr = 1;
             }
 
-            if (count_curr != FRAME_SEQ) {
+            if (count_curr != pkt_max) {
                 std::cout << std::format("\033[31mT2: 注意！丢帧：{:04d} == {:04d}\033[0m\n", frame_curr, count_curr);
                 continue;
             }
@@ -244,7 +278,7 @@ void t2_showframe(void)
             duration += std::chrono::duration_cast<std::chrono::microseconds>(finish - start);
 
             if (duration.count() >= FRAME_CNT) {
-                err = 100.0 * err_cnt / (FRAME_SEQ * fps_cnt);
+                err = 100.0 * err_cnt / (pkt_max * fps_cnt);
                 fps = 1.0 * FRAME_CNT * fps_rel / duration.count();
 
                 if (err > 100.0) {
