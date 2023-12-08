@@ -1,18 +1,31 @@
-#include <time.h>
+#include <mutex>
+#include <queue>
+#include <format>
 #include <thread>
-#include <csignal>
+#include <iostream>
+
+#include <time.h>
+#include <signal.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+
+#ifdef _WIN32
+#include <direct.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
+#else
 #include <netdb.h>
 #include <unistd.h>
-#include <iostream>
 #include <arpa/inet.h>
-#include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#endif
+
 #include <opencv2/opencv.hpp>
 
 using namespace std;
 
-#define FRAME_DLY     (50)
+#define FRAME_DLY     (20)
 #define FRAME_PKT     (1442)
 #define FRAME_SEQ     (1280)
 
@@ -28,11 +41,15 @@ using namespace std;
 #define COLOR_YELLOW  (0x00ffff)
 #define COLOR_MAGENTA (0xff00ff)
 
+#define TARGET_ADDR   "127.0.0.1"
+#define TARGET_PORT   (8001)
+
 bool running = false;
 
-mutex          frame_mutex;
-queue<cv::Mat> frame_queue;
+std::mutex          frame_mutex;
+std::queue<cv::Mat> frame_queue;
 
+#ifndef _WIN32
 void signal_handle(int signum)
 {
     switch (signum) {
@@ -44,6 +61,7 @@ void signal_handle(int signum)
         break;
     }
 }
+#endif
 
 void bgr888_rgb565(uint8_t *dst, const uint8_t *src, int size)
 {
@@ -95,9 +113,9 @@ void t1_genframe(void)
 {
     cv::Mat frame_buff(cv::Size(FRAME_WIDTH, FRAME_HEIGHT), CV_8UC3, cv::Scalar(0, 0, 0));
 
-    cout << "T1: 视频生成线程...启动" << endl;
-
     print_test_pattern(frame_buff.data, FRAME_WIDTH, FRAME_HEIGHT, 3);
+
+    std::cout << "T1: 视频生成线程...启动\n";
 
     while (running) {
         if (frame_queue.empty()) {
@@ -106,31 +124,40 @@ void t1_genframe(void)
             frame_mutex.unlock();
         }
 
-        usleep(1000 * FRAME_DLY);
+        std::this_thread::sleep_for(std::chrono::milliseconds(FRAME_DLY));
     }
 
-    cout << "T1: 视频生成线程...关闭" << endl;
+    std::cout << "T1: 视频生成线程...关闭\n";
 }
 
 void t2_sendframe(void)
 {
     int ret = 0;
     int sock_fd = 0;
-    struct sockaddr_in dst_addr = { 0 };
+    struct sockaddr_in sock_addr = { 0 };
 
     uint16_t pkt_idx = 0;
     uint8_t  pkt_buff[FRAME_PKT] = {0};
 
     cv::Mat frame_buff(cv::Size(FRAME_WIDTH, FRAME_HEIGHT), CV_8UC3, cv::Scalar(0, 0, 0));
 
-    dst_addr.sin_family = AF_INET;
-    dst_addr.sin_addr.s_addr = inet_addr("192.168.2.102");
-    dst_addr.sin_port = htons(8001);
+    std::cout << "T2: 视频发送线程...启动\n";
 
-    cout << "T2: 视频发送线程...启动" << endl;
+    sock_addr.sin_family = AF_INET;
+    sock_addr.sin_port = htons(TARGET_PORT);
+
+    inet_pton(sock_addr.sin_family, TARGET_ADDR, &sock_addr.sin_addr);
+
+#ifdef _WIN32
+    WSADATA wsa_data = { 0 };
+    if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0) {
+        std::cout << "T2: 故障！套接字未初始化\n";
+        goto err_t2;
+    }
+#endif
 
     if ((sock_fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-        printf("T2: 故障！无法创建套接字\n");
+        std::cout << "T2: 故障！无法创建套接字\n";
         goto err_t2;
     }
 
@@ -147,29 +174,41 @@ void t2_sendframe(void)
 
                 bgr888_rgb565(pkt_buff + 2, frame_buff.data + pkt_idx * (FRAME_PKT - 2) * 3 / 2, (FRAME_PKT - 2) / 2);
 
-                if ((ret = sendto(sock_fd, pkt_buff, FRAME_PKT, 0, (const sockaddr *)&dst_addr, sizeof(dst_addr))) < 0) {
-                    printf("T2: 故障: %s\n", strerror(errno));
+                if ((ret = sendto(sock_fd, (const char *)pkt_buff, FRAME_PKT, 0, (const sockaddr *)&sock_addr, sizeof(sock_addr))) < 0) {
+                    std::cout << "T2: 注意！无法写入套接字\n";
+                    goto err_t2s;
                 }
             }
         }
 
-        usleep(1000);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
+err_t2s:
+#ifdef _WIN32
+    closesocket(sock_fd);
+
+    WSACleanup();
+#else
     close(sock_fd);
+#endif
 
 err_t2:
     running = false;
 
-    cout << "T2: 视频发送线程...关闭" << endl;
+    std::cout << "T2: 视频发送线程...关闭\n";
 }
 
 int main(void)
 {
+#ifdef _WIN32
+    SetConsoleOutputCP(CP_UTF8);
+#else
     signal(SIGINT, signal_handle);
     signal(SIGTERM, signal_handle);
+#endif
 
-    cout << "M : 视频生成进程...启动" << endl;
+    std::cout << "M : 视频生成进程...启动\n";
 
     running = true;
 
@@ -177,9 +216,12 @@ int main(void)
     t1.detach();
     thread t2(t2_sendframe);
     t2.join();
-    t1.join();
 
-    cout << "M : 视频生成进程...关闭" << endl;
+    if (t1.joinable()) {
+        t1.join();
+    }
+
+    std::cout << "M : 视频生成进程...关闭\n";
 
     return 0;
 }

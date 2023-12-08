@@ -34,14 +34,13 @@
 #define FRAME_DISP   (1440)
 #define FRAME_RATE   (  60)
 
-#define LISTEN_ADDR  "192.168.2.102"
+#define LISTEN_ADDR  "127.0.0.1"
 #define LISTEN_PORT  (8001)
 
-#define IMAGE_PATH  "Images/"
-#define VIDEO_PATH  "Videos/"
+#define IMAGE_PATH   "Images/"
+#define VIDEO_PATH   "Videos/"
 
 bool running = false;
-bool fullscreen = false;
 
 std::mutex           frame_mutex;
 std::queue<cv::Mat>  frame_queue;
@@ -274,28 +273,31 @@ void t2_showframe(void)
 
             fps_rel += 1;
 
-            finish    = std::chrono::high_resolution_clock::now();
-            duration += std::chrono::duration_cast<std::chrono::microseconds>(finish - start);
-
-            if (duration.count() >= FRAME_CNT) {
-                err = 100.0 * err_cnt / (pkt_max * fps_cnt);
-                fps = 1.0 * FRAME_CNT * fps_rel / duration.count();
-
-                if (err > 100.0) {
-                    err = 100.0;
-                }
-
-                duration = duration.zero();
-
-                err_cnt = 0;
-                fps_cnt = 0;
-                fps_rel = 0;
-            }
-
             for (int i = 0; i < FRAME_HEIGHT; i++) {
                 memcpy(frame_disp.data + i * FRAME_DISP * 3, frame_buff.data + i* FRAME_WIDTH * 3, FRAME_WIDTH * 3);
             }
 
+            // M1
+            cv::rectangle(frame_disp, cv::Point(FRAME_WIDTH / 2 - 53, 2), cv::Point(FRAME_WIDTH / 2 - 3, 32), cv::Scalar(0, 0, 0), cv::FILLED);
+            cvui::printf(frame_disp, FRAME_WIDTH / 2 - 48, 5, 1.0, 0xffffff, "M1");
+
+            // M2
+            cv::rectangle(frame_disp, cv::Point(FRAME_WIDTH / 2 - 53, FRAME_HEIGHT / 2), cv::Point(FRAME_WIDTH / 2 - 3, FRAME_HEIGHT / 2 + 32), cv::Scalar(0, 0, 0), cv::FILLED);
+            cvui::printf(frame_disp, FRAME_WIDTH / 2 - 48, FRAME_HEIGHT / 2 + 4, 1.0, 0xffffff, "M2");
+
+            // S1
+            cv::rectangle(frame_disp, cv::Point(FRAME_WIDTH - 51, 2), cv::Point(FRAME_WIDTH - 3, 32), cv::Scalar(0, 0, 0), cv::FILLED);
+            cvui::printf(frame_disp, FRAME_WIDTH - 46, 5, 1.0, 0xffffff, "S1");
+
+            // S2
+            cv::rectangle(frame_disp, cv::Point(FRAME_WIDTH - 51, FRAME_HEIGHT / 3), cv::Point(FRAME_WIDTH - 3, FRAME_HEIGHT / 3 + 32), cv::Scalar(0, 0, 0), cv::FILLED);
+            cvui::printf(frame_disp, FRAME_WIDTH - 46, FRAME_HEIGHT / 3 + 4, 1.0, 0xffffff, "S2");
+
+            // S3
+            cv::rectangle(frame_disp, cv::Point(FRAME_WIDTH - 51, FRAME_HEIGHT / 3 * 2), cv::Point(FRAME_WIDTH - 3, FRAME_HEIGHT / 3 * 2 + 32), cv::Scalar(0, 0, 0), cv::FILLED);
+            cvui::printf(frame_disp, FRAME_WIDTH - 46, FRAME_HEIGHT / 3 * 2 + 4, 1.0, 0xffffff, "S3");
+
+            // Control
             cv::rectangle(frame_disp, cv::Point(0, 0), cv::Point(FRAME_WIDTH - 1, FRAME_HEIGHT - 1), cv::Scalar(255, 255, 255), 1);
             cv::rectangle(frame_disp, cv::Point(FRAME_WIDTH, 0), cv::Point(FRAME_DISP - 1, FRAME_HEIGHT - 1), cv::Scalar(0, 0, 0), cv::FILLED);
             cv::rectangle(frame_disp, cv::Point(FRAME_WIDTH - 1, 0), cv::Point(FRAME_DISP - 1, FRAME_HEIGHT / 2 - 1), cv::Scalar(255, 255, 255), 1);
@@ -332,6 +334,24 @@ void t2_showframe(void)
                 cvui::printf(frame_disp, 1350, 644, 0.4, 0xffffff, "File:");
                 cvui::printf(frame_disp, 1287, 664, 0.4, 0xffffff, "%s", video_time.c_str());
                 cvui::printf(frame_disp, 1345, 684, 0.4, 0xffffff, ".mp4");
+            }
+
+            finish = std::chrono::high_resolution_clock::now();
+            duration += std::chrono::duration_cast<std::chrono::microseconds>(finish - start);
+
+            if (duration.count() >= FRAME_CNT) {
+                err = 100.0 * err_cnt / (pkt_max * fps_cnt);
+                fps = 1.0 * FRAME_CNT * fps_rel / duration.count();
+
+                if (err > 100.0) {
+                    err = 100.0;
+                }
+
+                duration = duration.zero();
+
+                err_cnt = 0;
+                fps_cnt = 0;
+                fps_rel = 0;
             }
 
             std::string s = std::format("FPS:{:.1f}", fps);
